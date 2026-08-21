@@ -3,6 +3,8 @@ import { TimetableEntry } from '../types';
 const PROXY_SERVER_URL = import.meta.env.VITE_PROXY_SERVER_URL || 'https://lecturebag-production.up.railway.app';
 
 export async function analyzeTimetableImage(base64Image: string, apiKey?: string): Promise<TimetableEntry[]> {
+  let proxyErrorMsg = '';
+
   // 1. 프록시 서버(Railway)를 통한 요청 시도
   try {
     const res = await fetch(`${PROXY_SERVER_URL}/api/analyze-timetable`, {
@@ -20,16 +22,18 @@ export async function analyzeTimetableImage(base64Image: string, apiKey?: string
       }
     } else {
       const errText = await res.text();
+      proxyErrorMsg = `서버 응답 오류 (${res.status}): ${errText}`;
       console.warn('Proxy server error on analyze-timetable:', errText);
     }
-  } catch (proxyErr) {
+  } catch (proxyErr: any) {
+    proxyErrorMsg = `서버 연결 실패: ${proxyErr?.message || proxyErr}`;
     console.warn('Failed to reach proxy server:', proxyErr);
   }
 
   // 2. 프록시 실패 시 (또는 사용자가 직접 입력한 로컬 API 키가 있을 경우) Fallback
   const cleanKey = apiKey ? apiKey.trim() : '';
   if (!cleanKey) {
-    throw new Error('프록시 서버 응답에 실패했으며 설정된 Gemini API Key가 없습니다.');
+    throw new Error(`백엔드 서버 통신에 실패했습니다. (${proxyErrorMsg || '응답 없음'})`);
   }
 
   const mimeMatch = base64Image.match(/^data:(image\/\w+);base64,/);
@@ -70,7 +74,7 @@ Output strictly raw JSON without any markdown formatting or commentary.
     },
   };
 
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
@@ -99,6 +103,8 @@ Output strictly raw JSON without any markdown formatting or commentary.
 }
 
 export async function generateAiSummary(fileDataUrl: string | undefined, fileName: string, apiKey?: string): Promise<string> {
+  let proxyErrorMsg = '';
+
   // 1. 프록시 서버(Railway)를 통한 요청 시도
   try {
     const res = await fetch(`${PROXY_SERVER_URL}/api/summarize`, {
@@ -116,16 +122,18 @@ export async function generateAiSummary(fileDataUrl: string | undefined, fileNam
       }
     } else {
       const errText = await res.text();
+      proxyErrorMsg = `서버 응답 오류 (${res.status}): ${errText}`;
       console.warn('Proxy server error on summarize:', errText);
     }
-  } catch (proxyErr) {
+  } catch (proxyErr: any) {
+    proxyErrorMsg = `서버 연결 실패: ${proxyErr?.message || proxyErr}`;
     console.warn('Failed to reach proxy server:', proxyErr);
   }
 
   // 2. 프록시 실패 시 Direct API Fallback
   const cleanKey = apiKey ? apiKey.trim() : '';
   if (!cleanKey) {
-    throw new Error('프록시 서버 응답에 실패했으며 설정된 Gemini API Key가 없습니다.');
+    throw new Error(`백엔드 서버 통신에 실패했습니다. (${proxyErrorMsg || '응답 없음'})`);
   }
 
   const prompt = `내가 올리는 사진 혹은 음성 녹음에 있는 내용을 이해하기 쉽게 설명해줘. 내가 사진 혹은 음성 녹음을 계속 올릴 텐데, 그 전에 올렸던 사진과 음성 녹음의 내용들까지 합쳐서 정리하지 말고, 올린 사진의 내용만을 설명해줘. 내용을 자세하게 설명해줘. 정리한 내용을 Markdown 형식으로 정리해줘.`;
@@ -155,7 +163,7 @@ export async function generateAiSummary(fileDataUrl: string | undefined, fileNam
     generationConfig: { temperature: 0.2 },
   };
 
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;

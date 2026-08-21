@@ -2,6 +2,7 @@ import os
 import re
 import json
 import base64
+import traceback
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,11 +26,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash']
+
 def get_client():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
+        print("ERROR: GEMINI_API_KEY environment variable is not set!")
         raise HTTPException(status_code=500, detail="서버에 GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
-    return genai.Client(api_key=api_key)
+    return genai.Client(api_key=api_key.strip())
 
 class PromptRequest(BaseModel):
     prompt: str
@@ -62,15 +66,20 @@ def read_root():
 
 @app.post("/api/generate", response_model=PromptResponse)
 async def generate_content(request: PromptRequest):
-    try:
-        client = get_client()
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=request.prompt
-        )
-        return PromptResponse(text=response.text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    client = get_client()
+    last_err = None
+    for model_name in MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=request.prompt
+            )
+            return PromptResponse(text=response.text)
+        except Exception as e:
+            print(f"Error with model {model_name}: {e}")
+            last_err = e
+    traceback.print_exc()
+    raise HTTPException(status_code=500, detail=str(last_err))
 
 @app.post("/api/analyze-timetable", response_model=TimetableResponse)
 async def analyze_timetable(request: TimetableRequest):
@@ -97,24 +106,34 @@ Return a valid JSON array where each element matches this exact structure:
 ]
 Output strictly raw JSON without any markdown formatting or commentary.
 """
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-            ]
-        )
+        contents = [
+            prompt,
+            types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        ]
         
-        cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
-        json_match = re.search(r"\[\s*\{[\s\S]*\}\s*\]", cleaned_text)
-        json_to_parse = json_match.group(0) if json_match else cleaned_text
-        parsed = json.loads(json_to_parse)
-        
-        if not isinstance(parsed, list):
-            raise ValueError("시간표 데이터가 올바른 배열 형식이 아닙니다.")
-            
-        return TimetableResponse(entries=parsed)
+        last_err = None
+        for model_name in MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents
+                )
+                cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
+                json_match = re.search(r"\[\s*\{[\s\S]*\}\s*\]", cleaned_text)
+                json_to_parse = json_match.group(0) if json_match else cleaned_text
+                parsed = json.loads(json_to_parse)
+                
+                if not isinstance(parsed, list):
+                    raise ValueError("시간표 데이터가 올바른 배열 형식이 아닙니다.")
+                    
+                return TimetableResponse(entries=parsed)
+            except Exception as e:
+                print(f"Error with model {model_name}: {e}")
+                last_err = e
+                
+        raise last_err if last_err else Exception("모든 모델 분석에 실패했습니다.")
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/summarize", response_model=SummaryResponse)
@@ -142,12 +161,21 @@ async def summarize_content(request: SummaryRequest):
         else:
             contents.append(f"[파일 데이터가 로드되지 않았습니다. 파일명: {request.fileName}]")
             
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=contents
-        )
-        return SummaryResponse(summary=response.text.strip())
+        last_err = None
+        for model_name in MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents
+                )
+                return SummaryResponse(summary=response.text.strip())
+            except Exception as e:
+                print(f"Error with model {model_name}: {e}")
+                last_err = e
+                
+        raise last_err if last_err else Exception("모든 모델 요약 생성에 실패했습니다.")
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
