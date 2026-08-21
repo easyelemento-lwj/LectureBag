@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@layer base {
+  *, ::before, ::after {
+    font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+  }
+
+  :root {
+    font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+  }
+  
+  body {
+    font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+    letter-spacing: -0.015em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  .font-mono {
+    font-family: "Pretendard Variable", Pretendard, monospace !important;
+    font-variant-numeric: tabular-nums;
+  }
+}
