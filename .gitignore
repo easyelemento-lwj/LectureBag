@@ -1,0 +1,11 @@
+.DS_Store
+/build/
+DerivedData/
+.idea/
+.env
+.env.local
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
