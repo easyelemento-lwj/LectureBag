@@ -6,7 +6,8 @@ from typing import Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 # .env 파일이 있으면 자동으로 로드 (로컬 개발 환경 지원)
@@ -24,12 +25,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_model():
+def get_client():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="서버에 GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-2.5-flash')
+    return genai.Client(api_key=api_key)
 
 class PromptRequest(BaseModel):
     prompt: str
@@ -63,8 +63,11 @@ def read_root():
 @app.post("/api/generate", response_model=PromptResponse)
 async def generate_content(request: PromptRequest):
     try:
-        model = get_model()
-        response = model.generate_content(request.prompt)
+        client = get_client()
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=request.prompt
+        )
         return PromptResponse(text=response.text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -72,7 +75,7 @@ async def generate_content(request: PromptRequest):
 @app.post("/api/analyze-timetable", response_model=TimetableResponse)
 async def analyze_timetable(request: TimetableRequest):
     try:
-        model = get_model()
+        client = get_client()
         
         base64_image = request.base64Image
         mime_match = re.match(r"^data:(image\/\w+);base64,", base64_image)
@@ -94,10 +97,13 @@ Return a valid JSON array where each element matches this exact structure:
 ]
 Output strictly raw JSON without any markdown formatting or commentary.
 """
-        response = model.generate_content([
-            prompt,
-            {"mime_type": mime_type, "data": image_bytes}
-        ])
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+            ]
+        )
         
         cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
         json_match = re.search(r"\[\s*\{[\s\S]*\}\s*\]", cleaned_text)
@@ -114,10 +120,10 @@ Output strictly raw JSON without any markdown formatting or commentary.
 @app.post("/api/summarize", response_model=SummaryResponse)
 async def summarize_content(request: SummaryRequest):
     try:
-        model = get_model()
+        client = get_client()
         prompt = "내가 올리는 사진 혹은 음성 녹음에 있는 내용을 이해하기 쉽게 설명해줘. 내가 사진 혹은 음성 녹음을 계속 올릴 텐데, 그 전에 올렸던 사진과 음성 녹음의 내용들까지 합쳐서 정리하지 말고, 올린 사진의 내용만을 설명해줘. 내용을 자세하게 설명해줘. 정리한 내용을 Markdown 형식으로 정리해줘."
         
-        parts = [prompt]
+        contents = [prompt]
         if request.fileDataUrl and request.fileDataUrl.startswith("data:"):
             mime_match = re.match(r"^data:([a-zA-Z0-9-]+\/[a-zA-Z0-9-+.]+);base64,", request.fileDataUrl)
             mime_type = mime_match.group(1) if mime_match else "image/jpeg"
@@ -132,11 +138,14 @@ async def summarize_content(request: SummaryRequest):
                 
             base64_data = re.sub(r"^data:([a-zA-Z0-9-]+\/[a-zA-Z0-9-+.]+);base64,", "", request.fileDataUrl)
             file_bytes = base64.b64decode(base64_data)
-            parts.append({"mime_type": mime_type, "data": file_bytes})
+            contents.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))
         else:
-            parts.append(f"[파일 데이터가 로드되지 않았습니다. 파일명: {request.fileName}]")
+            contents.append(f"[파일 데이터가 로드되지 않았습니다. 파일명: {request.fileName}]")
             
-        response = model.generate_content(parts)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents
+        )
         return SummaryResponse(summary=response.text.strip())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

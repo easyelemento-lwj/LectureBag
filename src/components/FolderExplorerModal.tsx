@@ -609,11 +609,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   };
 
   const startAiSummaryProcess = () => {
-    if (!geminiApiKey) {
-      showToast('Gemini API Key가 필요합니다. 설정에서 API Key를 등록해주세요.');
-      return;
-    }
-
     setIsAiStartingBubbleOpen(true);
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10);
@@ -814,11 +809,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const handleTimetableFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (!geminiApiKey) {
-        alert("Gemini API Key가 필요합니다. 환경설정에서 API Key를 입력해주세요.");
-        return;
-      }
-      
       const reader = new FileReader();
       reader.onload = async (event) => {
         if (event.target?.result) {
