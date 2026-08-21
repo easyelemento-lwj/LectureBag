@@ -26,14 +26,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash']
+MODELS = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-pro',
+    'gemini-1.5-pro-latest',
+    'gemini-2.5-flash'
+]
 
 def get_client():
-    api_key = os.environ.get("GEMINI_API_KEY")
+    raw_key = os.environ.get("GEMINI_API_KEY", "")
+    api_key = raw_key.strip().strip('"').strip("'")
     if not api_key:
         print("ERROR: GEMINI_API_KEY environment variable is not set!")
         raise HTTPException(status_code=500, detail="서버에 GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
-    return genai.Client(api_key=api_key.strip())
+    return genai.Client(api_key=api_key)
 
 class PromptRequest(BaseModel):
     prompt: str
@@ -63,6 +71,15 @@ class SummaryResponse(BaseModel):
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Gemini Proxy Server is running!"}
+
+@app.get("/api/models")
+def list_available_models():
+    try:
+        client = get_client()
+        models = [m.name for m in client.models.list()]
+        return {"status": "ok", "available_models": models}
+    except Exception as e:
+        return {"status": "error", "error_message": str(e)}
 
 @app.post("/api/generate", response_model=PromptResponse)
 async def generate_content(request: PromptRequest):
