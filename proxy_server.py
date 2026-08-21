@@ -3,6 +3,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+# .env 파일이 있으면 자동으로 로드 (로컬 환경 지원)
+load_dotenv()
+
 
 # FastAPI 앱 초기화
 app = FastAPI(title="Gemini API Proxy")
