@@ -183,14 +183,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Bottom Mode Pill */}
-      <div
-        className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-neutral-900/80 backdrop-blur-md px-3 py-1 rounded-full border border-white/15 text-[11px] font-medium flex items-center gap-1.5 shadow-md"
-        style={{ color: accentColor }}
-      >
-        <Sparkles className="w-3 h-3" style={{ color: accentColor }} />
-        <span>PPT / 판서 자동 보정 모드</span>
-      </div>
+      {/* Bottom Mode Pill removed as requested */}
     </>
   );
 };

@@ -64,7 +64,7 @@ export const MainView: React.FC = () => {
       />
 
       {/* ── Floating Bottom Navigation Bar ── */}
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30">
         <BottomNav
           isAudioMode={state.isAudioMode}
           isRecording={state.isRecording}
