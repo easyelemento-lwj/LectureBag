@@ -42,18 +42,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onOpenFolder,
 }) => {
   const pillBase =
-    'bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-2xl rounded-full py-2.5 flex items-center justify-between';
+    'bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-2xl rounded-full h-[84px] px-7 flex items-center justify-between';
   const btnBase =
     'rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 flex items-center justify-center text-[#333333] hover:text-black active:scale-90 transition-all shadow-md';
 
   if (isAudioMode && isRecording) {
     /* ── Recording Active ── */
     return (
-      <div className={`${pillBase} gap-6 px-6`}>
+      <div className={`${pillBase} gap-6`}>
         {/* Recent Recordings */}
         <button
           onClick={onOpenRecentRecordings}
-          className={`w-13.5 h-13.5 relative ${btnBase}`}
+          className={`w-14 h-14 relative ${btnBase}`}
           title="최근 녹음 파일"
         >
           <Volume2 className="w-6 h-6 stroke-[2]" />
@@ -67,7 +67,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Pause / Resume */}
         <button
           onClick={onTogglePauseRecording}
-          className="w-13.5 h-13.5 rounded-full bg-white text-[#333333] flex items-center justify-center active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 hover:bg-neutral-100 shadow-md"
+          className="w-14 h-14 rounded-full bg-white text-[#333333] flex items-center justify-center active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 hover:bg-neutral-100 shadow-md"
           title={isPaused ? '녹음 재개' : '녹음 일시정지'}
         >
           {isPaused ? (
@@ -80,7 +80,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Stop */}
         <button
           onClick={onStopRecording}
-          className="w-13.5 h-13.5 rounded-full bg-white text-[#333333] flex items-center justify-center shadow-md active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 hover:bg-neutral-100"
+          className="w-14 h-14 rounded-full bg-white text-[#333333] flex items-center justify-center shadow-md active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 hover:bg-neutral-100"
           title="녹음 완전 정지 및 저장"
         >
           <Square className="w-6 h-6 fill-transparent stroke-[2]" />
@@ -89,7 +89,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Folder */}
         <button
           onClick={onOpenFolder}
-          className={`w-13.5 h-13.5 ${btnBase}`}
+          className={`w-14 h-14 ${btnBase}`}
           title="폴더 탐색기"
         >
           <Folder className="w-6 h-6 stroke-[2]" />

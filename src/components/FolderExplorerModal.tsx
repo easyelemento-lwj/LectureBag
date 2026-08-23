@@ -1377,7 +1377,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         className="absolute inset-0 z-50 bg-[#F7F7F8] text-neutral-900 flex flex-col justify-between overflow-hidden font-sans select-none"
       >
         {/* 1. Header Bar */}
-        <div className="py-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs">
+        <div
+          className="pb-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs"
+          style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}
+        >
           <button
             onClick={() => {
               if (navPath.length > 0) {
@@ -1386,20 +1389,20 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 onClose();
               }
             }}
-            className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-95 transition-transform"
+            className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
             title="뒤로가기"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-5.5 h-5.5" />
           </button>
 
-          <div className="flex items-center gap-2 relative">
+          <div className="flex items-center gap-2.5 relative">
             {/* 플러스 (외부 파일 추가) 버튼 */}
             <button
               onClick={handleStartImportingFile}
-              className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-95 transition-transform"
+              className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
               title="외부 파일 추가"
             >
-              <Plus className="w-4.5 h-4.5 stroke-[2.5]" />
+              <Plus className="w-5.5 h-5.5 stroke-[2.5]" />
             </button>
 
             {/* 돋보기 (Search) 버튼 */}
@@ -1413,14 +1416,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   setSearchQuery('');
                 }
               }}
-              className={`w-9 h-9 rounded-full flex items-center justify-center active:scale-95 transition-all ${
+              className={`w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-2xs ${
                 isSearchOpen
                   ? 'bg-neutral-900 text-white shadow-xs'
                   : 'bg-[#EFEFEF] hover:bg-[#E2E2E2] text-neutral-700'
               }`}
               title="검색"
             >
-              <Search className="w-4.5 h-4.5 stroke-[2]" />
+              <Search className="w-5.5 h-5.5 stroke-[2]" />
             </button>
 
             {/* 설정 (Settings) 버튼 */}
@@ -1434,12 +1437,12 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   setActiveSettingDetail(null);
                 }
               }}
-              className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-800 active:scale-95 transition-transform"
+              className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-800 active:scale-90 transition-transform shadow-2xs"
               title="설정"
             >
               <svg
                 viewBox="0 0 24 24"
-                className="w-5 h-5 text-neutral-800"
+                className="w-5.5 h-5.5 text-neutral-800"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2.2"
@@ -1455,10 +1458,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
             {/* 닫기 (Close) 버튼 */}
             <button
               onClick={onClose}
-              className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-95 transition-transform"
+              className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
               title="닫기"
             >
-              <X className="w-4.5 h-4.5" />
+              <X className="w-5.5 h-5.5" />
             </button>
           </div>
         </div>
@@ -2448,7 +2451,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               className="absolute inset-0 z-50 bg-[#F7F7F8] text-neutral-900 flex flex-col justify-between overflow-hidden font-sans"
             >
               {/* Settings Header */}
-              <div className="py-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs">
+              <div
+                className="pb-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs"
+                style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}
+              >
                 <button
                   onClick={() => {
                     if (activeSettingDetail === 'ai_process') {
@@ -2459,10 +2465,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       setIsSettingsOpen(false);
                     }
                   }}
-                  className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-95 transition-transform"
+                  className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
                   title="뒤로가기"
                 >
-                  <ArrowLeft className="w-5 h-5" />
+                  <ArrowLeft className="w-5.5 h-5.5" />
                 </button>
                 <h3 className="text-base font-bold text-neutral-900">
                   {activeSettingDetail === 'profile'
@@ -2484,10 +2490,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     setActiveSettingDetail(null);
                     setIsSettingsOpen(false);
                   }}
-                  className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-95 transition-transform"
+                  className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
                   title="닫기"
                 >
-                  <X className="w-4.5 h-4.5" />
+                  <X className="w-5.5 h-5.5" />
                 </button>
               </div>
 
@@ -2816,32 +2822,32 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     <div className="space-y-3">
                       {/* AI Center Toolbar */}
                       <div className="bg-white p-3 rounded-2xl border border-neutral-200/80 shadow-2xs flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                           <button
                             type="button"
                             title="검색"
                             onClick={() => showToast('검색 기능 준비 중입니다.')}
-                            className="w-10 h-10 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-95 text-neutral-700 transition-all flex items-center justify-center"
+                            className="w-11 h-11 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-90 text-neutral-700 transition-all flex items-center justify-center shadow-2xs"
                           >
-                            <Search className="w-5 h-5 text-neutral-700" />
+                            <Search className="w-5.5 h-5.5 stroke-[2] text-neutral-700" />
                           </button>
 
                           <button
                             type="button"
                             title="필터"
                             onClick={() => showToast('필터 기능 준비 중입니다.')}
-                            className="w-10 h-10 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-95 text-neutral-700 transition-all flex items-center justify-center"
+                            className="w-11 h-11 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-90 text-neutral-700 transition-all flex items-center justify-center shadow-2xs"
                           >
-                            <Filter className="w-5 h-5 text-neutral-700" />
+                            <Filter className="w-5.5 h-5.5 stroke-[2] text-neutral-700" />
                           </button>
 
                           <button
                             type="button"
                             title="프로세스 현황 보기"
                             onClick={() => setActiveSettingDetail('ai_process')}
-                            className="relative w-10 h-10 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-95 text-neutral-700 transition-all flex items-center justify-center"
+                            className="relative w-11 h-11 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-90 text-neutral-700 transition-all flex items-center justify-center shadow-2xs"
                           >
-                            <Cpu className="w-5 h-5 text-neutral-700" />
+                            <Cpu className="w-5.5 h-5.5 stroke-[2] text-neutral-700" />
                           </button>
                         </div>
                       </div>
@@ -3112,13 +3118,16 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               className="absolute inset-0 z-50 bg-[#F7F7F8] text-neutral-900 flex flex-col justify-between overflow-hidden font-sans select-none"
             >
               {/* iOS Top Navigation Header */}
-              <div className="py-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs flex-shrink-0">
+              <div
+                className="pb-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs flex-shrink-0"
+                style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}
+              >
                 <button
                   onClick={() => setPreviewDoc(null)}
-                  className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-95 transition-transform"
+                  className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
                   title="뒤로가기"
                 >
-                  <ArrowLeft className="w-5 h-5" />
+                  <ArrowLeft className="w-5.5 h-5.5" />
                 </button>
 
                 <div className="flex items-center gap-2 max-w-[200px] sm:max-w-md truncate">
@@ -3132,10 +3141,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
                 <button
                   onClick={() => setPreviewDoc(null)}
-                  className="w-9 h-9 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-95 transition-transform"
+                  className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
                   title="닫기"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5.5 h-5.5" />
                 </button>
               </div>
 
@@ -3267,9 +3276,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               animate={{ y: 0, opacity: 1, x: '-50%' }}
               exit={{ y: 80, opacity: 0, x: '-50%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="absolute bottom-6 left-1/2 z-[65]"
+              className="absolute left-1/2 z-[65]"
+              style={{ bottom: 'max(24px, env(safe-area-inset-bottom, 24px))' }}
             >
-              <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 text-neutral-800 shadow-2xl rounded-full px-4 py-2.5 flex items-center justify-center gap-3.5">
+              <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 text-neutral-800 shadow-2xl rounded-full h-[84px] px-7 flex items-center justify-center gap-6">
                 {/* 1. 다운로드 버튼 */}
                 <button
                   onClick={() => {
@@ -3280,10 +3290,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       showToast(`${count}개 항목 다운로드 시작`);
                     }
                   }}
-                  className="w-11 h-11 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-neutral-800 hover:bg-neutral-200 active:scale-90 transition-all flex items-center justify-center shadow-md"
+                  className="w-14 h-14 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-[#333333] hover:text-black active:scale-90 transition-all flex items-center justify-center shadow-md"
                   title="다운로드"
                 >
-                  <Download className="w-5 h-5 stroke-[2]" />
+                  <Download className="w-6 h-6 stroke-[2]" />
                 </button>
 
                 {/* 2. AI 버튼 (AI 센터가 아닐 때만 노출) */}
@@ -3296,10 +3306,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         startAiSummaryProcess();
                       }
                     }}
-                    className="w-11 h-11 rounded-full bg-neutral-900 border-2 border-neutral-800 ring-2 ring-neutral-700/60 text-white hover:bg-black active:scale-90 transition-all flex items-center justify-center shadow-md"
+                    className="w-14 h-14 rounded-full bg-neutral-900 border-2 border-neutral-800 ring-2 ring-neutral-700/60 text-white hover:bg-black active:scale-90 transition-all flex items-center justify-center shadow-md"
                     title="AI 스마트 요약"
                   >
-                    <Sparkles className="w-5 h-5 stroke-[2]" style={{ color: accentColor }} />
+                    <Sparkles className="w-6 h-6 stroke-[2]" style={{ color: accentColor }} />
                   </button>
                 )}
 
@@ -3319,14 +3329,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         setNewDocName(selectedAiDocs[0].name);
                       }
                     }}
-                    className={`w-11 h-11 rounded-full transition-all flex items-center justify-center ${
+                    className={`w-14 h-14 rounded-full transition-all flex items-center justify-center ${
                       selectedAiDocs.length > 1
                         ? 'bg-neutral-100/60 border-2 border-neutral-200/50 ring-2 ring-neutral-200/30 text-neutral-300 cursor-not-allowed'
-                        : 'bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-neutral-800 hover:bg-neutral-200 active:scale-90 shadow-md'
+                        : 'bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-[#333333] hover:text-black active:scale-90 shadow-md'
                     }`}
                     title={selectedAiDocs.length > 1 ? '1개의 문서만 선택 시 이용 가능' : '이름 바꾸기'}
                   >
-                    <Pencil className="w-5 h-5 stroke-[2]" />
+                    <Pencil className="w-6 h-6 stroke-[2]" />
                   </button>
                 )}
 
@@ -3345,14 +3355,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         setInfoModalItem(selectedAiDocs[0]);
                       }
                     }}
-                    className={`w-11 h-11 rounded-full transition-all flex items-center justify-center ${
+                    className={`w-14 h-14 rounded-full transition-all flex items-center justify-center ${
                       selectedAiDocs.length > 1
                         ? 'bg-neutral-100/60 border-2 border-neutral-200/50 ring-2 ring-neutral-200/30 text-neutral-300 cursor-not-allowed'
-                        : 'bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-neutral-800 hover:bg-neutral-200 active:scale-90 shadow-md'
+                        : 'bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-[#333333] hover:text-black active:scale-90 shadow-md'
                     }`}
                     title={selectedAiDocs.length > 1 ? '1개의 문서만 선택 시 이용 가능' : '정보 보기'}
                   >
-                    <Info className="w-5 h-5 stroke-[2]" />
+                    <Info className="w-6 h-6 stroke-[2]" />
                   </button>
                 )}
 
@@ -3384,10 +3394,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       showToast(`${targetIds.length}개 항목이 삭제되었습니다.`);
                     }
                   }}
-                  className="w-11 h-11 rounded-full bg-rose-50 border-2 border-rose-200 ring-2 ring-rose-200/60 text-rose-500 hover:bg-rose-100 active:scale-90 transition-all flex items-center justify-center shadow-md"
+                  className="w-14 h-14 rounded-full bg-rose-50 border-2 border-rose-200 ring-2 ring-rose-200/60 text-rose-500 hover:bg-rose-100 active:scale-90 transition-all flex items-center justify-center shadow-md"
                   title="삭제"
                 >
-                  <Trash2 className="w-5 h-5 stroke-[2]" />
+                  <Trash2 className="w-6 h-6 stroke-[2]" />
                 </button>
               </div>
             </motion.div>

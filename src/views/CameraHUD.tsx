@@ -12,7 +12,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Zap, ZapOff, RefreshCw, Mic, Camera, MoreHorizontal, Sparkles,
+  Zap, ZapOff, RefreshCw, Mic, Camera, MoreHorizontal, Sparkles, RotateCcw,
 } from 'lucide-react';
 import { FlashMode, AspectRatio } from '../types';
 import { useAccentColor } from '../context/AccentColorContext';
@@ -65,18 +65,24 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
       )}
 
       {/* Top-Left: Mic / Audio Button */}
-      <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
+      <div
+        className="absolute left-4 z-40 flex items-center gap-2"
+        style={{ top: 'max(16px, env(safe-area-inset-top, 16px))' }}
+      >
         <button
           onClick={onStartRecording}
-          className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-white w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-all shadow-lg"
+          className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-white w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-lg"
           title="음성 녹음 시작"
         >
-          <Mic className="w-5 h-5 text-[#D30000]" />
+          <Mic className="w-5.5 h-5.5 text-[#D30000]" />
         </button>
       </div>
 
       {/* Top-Center: Camera Status Indicator */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-[11px] font-medium shadow-md">
+      <div
+        className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-[11px] font-medium shadow-md"
+        style={{ top: 'max(16px, env(safe-area-inset-top, 16px))' }}
+      >
         <span
           className={`w-1.5 h-1.5 rounded-full ${
             cameraStatus === 'live'
@@ -96,7 +102,10 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
       </div>
 
       {/* Top-Right: Aspect Ratio + 3-dot menu */}
-      <div className="absolute top-4 right-4 z-40 flex items-center gap-2.5">
+      <div
+        className="absolute right-4 z-40 flex items-center gap-2.5"
+        style={{ top: 'max(16px, env(safe-area-inset-top, 16px))' }}
+      >
         <button
           onClick={onToggleAspectRatio}
           className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-white text-xs font-bold px-3.5 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-lg"
@@ -129,32 +138,44 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
                 {/* Flash Button */}
                 <button
                   onClick={onToggleFlash}
-                  className="w-10.5 h-10.5 rounded-full bg-neutral-900/90 backdrop-blur-md hover:bg-neutral-800 active:scale-90 border border-white/25 flex items-center justify-center transition-all shadow-lg"
+                  className="w-11 h-11 rounded-full bg-neutral-900/90 backdrop-blur-md hover:bg-neutral-800 active:scale-90 border border-white/25 flex items-center justify-center transition-all shadow-lg"
                   title={`플래시: ${flashMode.toUpperCase()}`}
                 >
                   {flashMode === 'on' ? (
-                    <Zap className="w-5 h-5 fill-current text-yellow-400" />
+                    <Zap className="w-5.5 h-5.5 fill-current text-yellow-400" />
                   ) : flashMode === 'auto' ? (
                     <div className="relative flex items-center justify-center">
-                      <Zap className="w-5 h-5 text-yellow-400" />
+                      <Zap className="w-5.5 h-5.5 text-yellow-400" />
                       <span className="absolute -bottom-1 -right-1 text-[8px] font-bold text-yellow-400">A</span>
                     </div>
                   ) : (
-                    <ZapOff className="w-5 h-5 text-neutral-400" />
+                    <ZapOff className="w-5.5 h-5.5 text-neutral-400" />
                   )}
                 </button>
 
                 {/* Camera Flip Button */}
                 <button
                   onClick={onToggleCameraFacing}
-                  className="w-10.5 h-10.5 rounded-full bg-neutral-900/90 backdrop-blur-md hover:bg-neutral-800 active:scale-90 border border-white/25 flex items-center justify-center transition-all shadow-lg"
+                  className="w-11 h-11 rounded-full bg-neutral-900/90 backdrop-blur-md hover:bg-neutral-800 active:scale-90 border border-white/25 flex items-center justify-center transition-all shadow-lg"
                   title={`카메라 전환: ${cameraFacing === 'front' ? '전면' : '후면'}`}
                 >
                   <RefreshCw
-                    className={`w-5 h-5 text-white transition-transform duration-300 ${
+                    className={`w-5.5 h-5.5 text-white transition-transform duration-300 ${
                       cameraFacing === 'front' ? 'rotate-180' : ''
                     }`}
                   />
+                </button>
+
+                {/* Hard Reload / Update App Button (for PWA Home Screen icon cache bust) */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.location.href = window.location.origin + '/?v=' + Date.now();
+                  }}
+                  className="w-11 h-11 rounded-full bg-neutral-900/90 backdrop-blur-md hover:bg-neutral-800 active:scale-90 border border-white/25 flex items-center justify-center transition-all shadow-lg"
+                  title="앱 새로고침 및 최신 버전 동기화"
+                >
+                  <RotateCcw className="w-5.5 h-5.5 text-white" />
                 </button>
               </motion.div>
             )}

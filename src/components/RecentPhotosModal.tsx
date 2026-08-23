@@ -78,13 +78,16 @@ export const RecentPhotosModal: React.FC<RecentPhotosModalProps> = ({
         className="absolute inset-0 z-50 bg-black text-white flex flex-col justify-between overflow-hidden font-sans select-none"
       >
         {/* iOS Top Bar */}
-        <div className="py-3 px-4 bg-transparent flex items-center justify-between">
+        <div
+          className="pb-3 px-4 bg-transparent flex items-center justify-between"
+          style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}
+        >
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-neutral-800/80 border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white active:scale-95 transition-all"
+            className="w-11 h-11 rounded-full bg-neutral-800/80 border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all shadow-2xs"
             title="카메라 모드로 돌아가기"
           >
-            <Camera className="w-4 h-4" />
+            <Camera className="w-5.5 h-5.5" />
           </button>
           <div className="text-center">
             <h2 className="text-xs font-bold tracking-tight text-neutral-200">최근 촬영한 사진</h2>
@@ -94,9 +97,10 @@ export const RecentPhotosModal: React.FC<RecentPhotosModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-neutral-800/80 border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white active:scale-95"
+            className="w-11 h-11 rounded-full bg-neutral-800/80 border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all shadow-2xs"
+            title="닫기"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5.5 h-5.5" />
           </button>
         </div>
 
@@ -250,7 +254,10 @@ export const RecentPhotosModal: React.FC<RecentPhotosModalProps> = ({
 
         {/* Thumbnail Strip & Consolidated 4-Button Toolbar */}
         {photos.length > 0 && (
-          <div className="bg-transparent px-4 pb-6 pt-1 flex flex-col gap-3">
+          <div
+            className="bg-transparent px-4 pt-1 flex flex-col gap-3"
+            style={{ paddingBottom: 'max(24px, env(safe-area-inset-bottom, 24px))' }}
+          >
             {/* Horizontal thumbnail scroll */}
             {photos.length > 1 && (
               <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none max-w-xs md:max-w-md mx-auto">
@@ -275,24 +282,24 @@ export const RecentPhotosModal: React.FC<RecentPhotosModalProps> = ({
             )}
 
             {/* Integrated 4-Button Action Toolbar (Camera Style) */}
-            <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-xl rounded-full px-5 py-2.5 flex items-center justify-between max-w-[320px] md:max-w-[420px] mx-auto w-full">
+            <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-2xl rounded-full h-[84px] px-7 flex items-center justify-between gap-6 max-w-[360px] md:max-w-[440px] mx-auto w-full">
               {/* Button 1: 조절 */}
               <button
                 onClick={() => {
                   setShowAdjust(!showAdjust);
                   setShowInfo(false);
                 }}
-                className="flex items-center justify-center text-neutral-700 hover:text-black active:scale-90 transition-transform"
+                className="flex items-center justify-center active:scale-90 transition-transform"
                 title="사진 조절"
               >
                 <div
-                  className={`w-11 h-11 rounded-full border-2 ring-2 ring-neutral-200/60 flex items-center justify-center transition-all ${
+                  className={`w-14 h-14 rounded-full border-2 ring-2 ring-neutral-200/60 shadow-md flex items-center justify-center transition-all ${
                     showAdjust
                       ? 'bg-black text-white border-black ring-neutral-300/80'
-                      : 'bg-neutral-100 border-neutral-200 text-neutral-700'
+                      : 'bg-neutral-100 border-neutral-200 text-[#333333]'
                   }`}
                 >
-                  <SlidersHorizontal className="w-5 h-5" />
+                  <SlidersHorizontal className="w-6 h-6 stroke-[2]" />
                 </div>
               </button>
 
@@ -302,39 +309,39 @@ export const RecentPhotosModal: React.FC<RecentPhotosModalProps> = ({
                   setShowInfo(!showInfo);
                   setShowAdjust(false);
                 }}
-                className="flex items-center justify-center text-neutral-700 hover:text-black active:scale-90 transition-transform"
+                className="flex items-center justify-center active:scale-90 transition-transform"
                 title="사진 정보"
               >
                 <div
-                  className={`w-11 h-11 rounded-full border-2 ring-2 ring-neutral-200/60 flex items-center justify-center transition-all ${
+                  className={`w-14 h-14 rounded-full border-2 ring-2 ring-neutral-200/60 shadow-md flex items-center justify-center transition-all ${
                     showInfo
                       ? 'bg-black text-white border-black ring-neutral-300/80'
-                      : 'bg-neutral-100 border-neutral-200 text-neutral-700'
+                      : 'bg-neutral-100 border-neutral-200 text-[#333333]'
                   }`}
                 >
-                  <Info className="w-5 h-5" />
+                  <Info className="w-6 h-6 stroke-[2]" />
                 </div>
               </button>
 
               {/* Button 3: 다운로드 */}
               <button
                 onClick={() => handleDownload(currentPhoto)}
-                className="flex items-center justify-center text-neutral-700 hover:text-black active:scale-90 transition-transform"
+                className="flex items-center justify-center active:scale-90 transition-transform"
                 title="다운로드"
               >
-                <div className="w-11 h-11 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 flex items-center justify-center text-neutral-700">
-                  <Download className="w-5 h-5" />
+                <div className="w-14 h-14 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 shadow-md flex items-center justify-center text-[#333333]">
+                  <Download className="w-6 h-6 stroke-[2]" />
                 </div>
               </button>
 
               {/* Button 4: 삭제 */}
               <button
                 onClick={() => handleDelete(currentPhoto.id)}
-                className="flex items-center justify-center text-red-600 hover:text-red-700 active:scale-90 transition-transform"
+                className="flex items-center justify-center active:scale-90 transition-transform"
                 title="삭제"
               >
-                <div className="w-11 h-11 rounded-full bg-red-50 border-2 border-red-200/80 ring-2 ring-neutral-200/60 flex items-center justify-center text-red-600">
-                  <Trash2 className="w-5 h-5" />
+                <div className="w-14 h-14 rounded-full bg-red-50 border-2 border-red-200/80 ring-2 ring-neutral-200/60 shadow-md flex items-center justify-center text-red-600">
+                  <Trash2 className="w-6 h-6 stroke-[2]" />
                 </div>
               </button>
             </div>

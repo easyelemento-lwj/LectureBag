@@ -23,7 +23,7 @@ export const MainView: React.FC = () => {
   const state = useAppState();
 
   return (
-    <div className="relative w-full h-full bg-black text-white flex flex-col justify-between overflow-hidden select-none font-sans">
+    <div className="fixed inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
 
       {/* Global Shutter Flash Animation */}
       <AnimatePresence>
@@ -64,7 +64,10 @@ export const MainView: React.FC = () => {
       />
 
       {/* ── Floating Bottom Navigation Bar ── */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30">
+      <div
+        className="absolute left-1/2 -translate-x-1/2 z-30"
+        style={{ bottom: 'max(24px, env(safe-area-inset-bottom, 24px))' }}
+      >
         <BottomNav
           isAudioMode={state.isAudioMode}
           isRecording={state.isRecording}

@@ -152,7 +152,7 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
   return (
     <div
       onClick={handleViewportTap}
-      className="relative flex-1 bg-black overflow-hidden flex items-center justify-center select-none w-full h-full my-auto"
+      className="absolute inset-0 w-full h-full bg-black overflow-hidden flex items-center justify-center select-none"
     >
       {isAudioMode ? (
         /* ── Audio Waveform Visualizer Mode ── */
@@ -165,10 +165,10 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
                 if (isRecording) onStopRecording(e);
                 onExitAudioMode();
               }}
-              className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-neutral-300 hover:text-white w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-all shadow-lg"
+              className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-neutral-300 hover:text-white w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-lg"
               title="카메라 모드로 돌아가기"
             >
-              <Camera className="w-5 h-5" />
+              <Camera className="w-5.5 h-5.5" />
             </button>
           </div>
 
@@ -224,39 +224,64 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
           </div>
         </div>
       ) : (
-        /* ── Normal Camera Viewport Mode ── */
-        <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-          {/* Dynamic Aspect Ratio Camera Container with Smooth Transition */}
-          <motion.div
-            layout
-            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-            className={`relative overflow-hidden bg-neutral-950 flex items-center justify-center transition-all duration-300 shadow-2xl ${getAspectRatioClasses()}`}
-          >
-            {/* Live Camera Feed or Black Screen Fallback */}
+        /* ── Normal Camera Viewport Mode (Always Edge-to-Edge Full Screen) ── */
+        <div className="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden bg-black">
+          {/* Live Camera Feed or Canvas Simulation - ALWAYS 100% FULL SCREEN */}
+          <div className="absolute inset-0 w-full h-full overflow-hidden bg-black">
             {cameraStatus === 'live' ? (
               <video
                 ref={setVideoRef}
                 autoPlay
                 playsInline
                 muted
-                className={`w-full h-full object-cover pointer-events-none select-none ${
+                className={`absolute inset-0 w-full h-full object-cover pointer-events-none select-none ${
                   cameraFacing === 'front' ? 'scale-x-[-1]' : ''
                 }`}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                }}
               />
             ) : (
-              <div className="w-full h-full bg-black flex items-center justify-center" />
+              <canvas
+                ref={simCanvasRef}
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                }}
+              />
             )}
+          </div>
 
-            {/* 3x3 Grid Overlay inside the Aspect Ratio Frame */}
-            <div className="absolute inset-0 pointer-events-none border border-white/10 grid grid-cols-3 grid-rows-3 z-10">
-              <div className="border-r border-b border-white/10" />
-              <div className="border-r border-b border-white/10" />
-              <div className="border-b border-white/10" />
-              <div className="border-r border-b border-white/10" />
-              <div className="border-r border-b border-white/10" />
-              <div className="border-b border-white/10" />
-              <div className="border-r border-b border-white/10" />
-              <div className="border-r border-b border-white/10" />
+          {/* Dynamic Aspect Ratio Guide Frame & 3x3 Grid Overlay */}
+          <motion.div
+            layout
+            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+            className={`pointer-events-none transition-all duration-300 z-10 ${getAspectRatioClasses()}`}
+          >
+            {/* 3x3 Grid Overlay */}
+            <div className="w-full h-full border border-white/20 grid grid-cols-3 grid-rows-3">
+              <div className="border-r border-b border-white/20" />
+              <div className="border-r border-b border-white/20" />
+              <div className="border-b border-white/20" />
+              <div className="border-r border-b border-white/20" />
+              <div className="border-r border-b border-white/20" />
+              <div className="border-b border-white/20" />
+              <div className="border-r border-b border-white/20" />
+              <div className="border-r border-b border-white/20" />
               <div />
             </div>
           </motion.div>

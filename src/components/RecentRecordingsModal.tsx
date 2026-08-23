@@ -169,19 +169,22 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
         className="absolute inset-0 z-50 bg-black text-white flex flex-col justify-between overflow-hidden font-sans select-none"
       >
         {/* iOS Top Navigation Header */}
-        <div className="py-2.5 px-4 flex items-center justify-between">
+        <div
+          className="pb-2.5 px-4 flex items-center justify-between"
+          style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}
+        >
           <button
             onClick={handleBackButtonClick}
-            className="w-9 h-9 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center text-white hover:bg-neutral-800 active:scale-95 transition-all"
+            className="w-11 h-11 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center text-white hover:bg-neutral-800 active:scale-90 transition-all shadow-2xs"
             title={isSelectMode ? '선택 해제' : '돌아가기'}
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-5.5 h-5.5" />
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={() => setIsSearchOpen(!isSearchOpen)}
-              className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95 border"
+              className="w-11 h-11 rounded-full flex items-center justify-center transition-all active:scale-90 border shadow-2xs"
               style={
                 isSearchOpen
                   ? { backgroundColor: accentColor, color: '#000000', borderColor: accentColor }
@@ -189,11 +192,11 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
               }
               title="검색"
             >
-              <Search className="w-4 h-4" />
+              <Search className="w-5.5 h-5.5 stroke-[2]" />
             </button>
             <button
               onClick={handleSelectButtonClick}
-              className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 border"
+              className="h-11 px-4 rounded-full text-xs font-semibold transition-all active:scale-90 border flex items-center justify-center shadow-2xs"
               style={
                 isSelectMode
                   ? { backgroundColor: accentColor, color: '#000000', borderColor: accentColor }
@@ -420,42 +423,47 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
           )}
         </div>
 
-        {/* Footer */}
+        {/* Selection Mode Floating Action Toolbar (Camera Style) */}
         {isSelectMode && (
-          <div className="py-2 px-8 bg-black border-t border-transparent flex items-center justify-between">
-            <button
-              disabled={selectedIds.length === 0}
-              onClick={() => {
-                selectedIds.forEach((id) => {
-                  const rec = recordings.find((r) => r.id === id);
-                  if (rec) {
-                    const link = document.createElement('a');
-                    link.href = (rec as any).dataUrl || 'data:audio/mp3;base64,';
-                    link.download = rec.name.endsWith('.m4a') || rec.name.endsWith('.mp3') ? rec.name : `${rec.name}.m4a`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                  }
-                });
-              }}
-              className="w-9 h-9 -translate-y-2 rounded-full bg-neutral-900 border border-neutral-700/60 text-neutral-200 hover:text-white flex items-center justify-center active:scale-90 transition-all shadow-md disabled:opacity-30 disabled:pointer-events-none"
-              title="선택한 항목 다운로드"
-            >
-              <Download className="w-[18px] h-[18px]" />
-            </button>
+          <div
+            className="absolute left-1/2 -translate-x-1/2 z-30 pointer-events-auto"
+            style={{ bottom: 'max(24px, env(safe-area-inset-bottom, 24px))' }}
+          >
+            <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-2xl rounded-full h-[84px] px-7 flex items-center justify-between gap-6">
+              <button
+                disabled={selectedIds.length === 0}
+                onClick={() => {
+                  selectedIds.forEach((id) => {
+                    const rec = recordings.find((r) => r.id === id);
+                    if (rec) {
+                      const link = document.createElement('a');
+                      link.href = (rec as any).dataUrl || 'data:audio/mp3;base64,';
+                      link.download = rec.name.endsWith('.m4a') || rec.name.endsWith('.mp3') ? rec.name : `${rec.name}.m4a`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }
+                  });
+                }}
+                className="w-14 h-14 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-[#333333] hover:text-black flex items-center justify-center active:scale-90 transition-all shadow-md disabled:opacity-30 disabled:pointer-events-none"
+                title="선택한 항목 다운로드"
+              >
+                <Download className="w-6 h-6 stroke-[2]" />
+              </button>
 
-            <button
-              disabled={selectedIds.length === 0}
-              onClick={() => {
-                selectedIds.forEach((id) => onDeleteRecording(id));
-                setSelectedIds([]);
-                setIsSelectMode(false);
-              }}
-              className="w-9 h-9 -translate-y-2 rounded-full bg-red-950/80 border border-red-800/60 text-red-400 flex items-center justify-center active:scale-90 transition-all shadow-md disabled:opacity-30 disabled:pointer-events-none"
-              title="선택한 항목 삭제"
-            >
-              <Trash2 className="w-[18px] h-[18px]" />
-            </button>
+              <button
+                disabled={selectedIds.length === 0}
+                onClick={() => {
+                  selectedIds.forEach((id) => onDeleteRecording(id));
+                  setSelectedIds([]);
+                  setIsSelectMode(false);
+                }}
+                className="w-14 h-14 rounded-full bg-red-50 border-2 border-red-200/80 ring-2 ring-neutral-200/60 text-red-600 hover:text-red-700 flex items-center justify-center active:scale-90 transition-all shadow-md disabled:opacity-30 disabled:pointer-events-none"
+                title="선택한 항목 삭제"
+              >
+                <Trash2 className="w-6 h-6 stroke-[2]" />
+              </button>
+            </div>
           </div>
         )}
       </motion.div>

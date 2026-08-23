@@ -9,7 +9,7 @@ import { AccentColorProvider } from './context/AccentColorContext';
 export default function App() {
   return (
     <AccentColorProvider>
-      <div className="w-full h-screen bg-black font-sans antialiased select-none overflow-hidden flex flex-col">
+      <div className="fixed inset-0 w-full h-full bg-black font-sans antialiased select-none overflow-hidden">
         <MainView />
       </div>
     </AccentColorProvider>
