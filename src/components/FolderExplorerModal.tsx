@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 import {
   Folder,
   FolderOpen,
@@ -365,54 +365,69 @@ const HoldableFolderCard: React.FC<HoldableFolderCardProps> = ({
 }) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isLongPressRef = useRef<boolean>(false);
-  const touchHandledRef = useRef<boolean>(false);
+  const startPosRef = useRef<{ x: number; y: number } | null>(null);
 
-  const handleStart = () => {
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => clearTimer();
+  }, []);
+
+  const handleStart = (clientX: number, clientY: number) => {
     isLongPressRef.current = false;
-    if (timerRef.current) clearTimeout(timerRef.current);
+    startPosRef.current = { x: clientX, y: clientY };
+    clearTimer();
     timerRef.current = setTimeout(() => {
       isLongPressRef.current = true;
       onSelect();
-    }, 450);
+    }, 500);
+  };
+
+  const handleMove = (clientX: number, clientY: number) => {
+    if (!startPosRef.current) return;
+    const dx = Math.abs(clientX - startPosRef.current.x);
+    const dy = Math.abs(clientY - startPosRef.current.y);
+    if (dx > 8 || dy > 8) {
+      clearTimer();
+    }
   };
 
   const handleEnd = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (!isLongPressRef.current) {
-      onNavigate();
-    }
+    clearTimer();
+    startPosRef.current = null;
   };
 
-  const handleCancel = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
+  const handleClick = (e: React.MouseEvent) => {
+    clearTimer();
+    if (isLongPressRef.current) {
+      isLongPressRef.current = false;
+      return;
     }
+    onNavigate();
   };
 
   return (
     <div
-      onTouchStart={() => {
-        touchHandledRef.current = true;
-        handleStart();
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        handleStart(e.clientX, e.clientY);
       }}
-      onTouchEnd={() => {
-        handleEnd();
-        setTimeout(() => {
-          touchHandledRef.current = false;
-        }, 300);
+      onPointerMove={(e) => {
+        handleMove(e.clientX, e.clientY);
       }}
-      onTouchCancel={handleCancel}
-      onMouseDown={() => {
-        if (!touchHandledRef.current) handleStart();
+      onPointerUp={handleEnd}
+      onPointerCancel={handleEnd}
+      onPointerLeave={handleEnd}
+      onClick={handleClick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onSelect();
       }}
-      onMouseUp={() => {
-        if (!touchHandledRef.current) handleEnd();
-      }}
-      onMouseLeave={handleCancel}
       className={className}
     >
       {children}
@@ -438,58 +453,74 @@ const HoldableFileCard: React.FC<HoldableFileCardProps> = ({
 }) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isLongPressRef = useRef<boolean>(false);
-  const touchHandledRef = useRef<boolean>(false);
+  const startPosRef = useRef<{ x: number; y: number } | null>(null);
 
-  const handleStart = () => {
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => clearTimer();
+  }, []);
+
+  const handleStart = (clientX: number, clientY: number) => {
+    if (isSelectionMode) return;
     isLongPressRef.current = false;
-    if (timerRef.current) clearTimeout(timerRef.current);
+    startPosRef.current = { x: clientX, y: clientY };
+    clearTimer();
     timerRef.current = setTimeout(() => {
       isLongPressRef.current = true;
       onSelect();
-    }, 450);
+    }, 500);
+  };
+
+  const handleMove = (clientX: number, clientY: number) => {
+    if (!startPosRef.current) return;
+    const dx = Math.abs(clientX - startPosRef.current.x);
+    const dy = Math.abs(clientY - startPosRef.current.y);
+    if (dx > 8 || dy > 8) {
+      clearTimer();
+    }
   };
 
   const handleEnd = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (!isLongPressRef.current) {
-      if (isSelectionMode) {
-        onSelect();
-      } else {
-        onClickNormal();
-      }
-    }
+    clearTimer();
+    startPosRef.current = null;
   };
 
-  const handleCancel = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
+  const handleClick = (e: React.MouseEvent) => {
+    clearTimer();
+    if (isLongPressRef.current) {
+      isLongPressRef.current = false;
+      return;
+    }
+    if (isSelectionMode) {
+      onSelect();
+    } else {
+      onClickNormal();
     }
   };
 
   return (
     <div
-      onTouchStart={() => {
-        touchHandledRef.current = true;
-        handleStart();
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        handleStart(e.clientX, e.clientY);
       }}
-      onTouchEnd={() => {
-        handleEnd();
-        setTimeout(() => {
-          touchHandledRef.current = false;
-        }, 300);
+      onPointerMove={(e) => {
+        handleMove(e.clientX, e.clientY);
       }}
-      onTouchCancel={handleCancel}
-      onMouseDown={() => {
-        if (!touchHandledRef.current) handleStart();
+      onPointerUp={handleEnd}
+      onPointerCancel={handleEnd}
+      onPointerLeave={handleEnd}
+      onClick={handleClick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onSelect();
       }}
-      onMouseUp={() => {
-        if (!touchHandledRef.current) handleEnd();
-      }}
-      onMouseLeave={handleCancel}
       className={className}
     >
       {children}
@@ -533,6 +564,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
   // Selection Mode state
   const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
+  const [newlyUploadedIds, setNewlyUploadedIds] = useState<string[]>([]);
+  const [isReorderMode, setIsReorderMode] = useState<boolean>(false);
+  const [reorderEntries, setReorderEntries] = useState<Array<{ id: string; type: 'bundle' | 'single'; files: MediaFile[] }>>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [isAiStartingBubbleOpen, setIsAiStartingBubbleOpen] = useState<boolean>(false);
 
@@ -564,6 +598,18 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     ...getPersistedAiDocs(),
     ...getSampleMediaFiles(photos, recordings),
   ]);
+
+  // Sync newly captured photos & recordings into mediaList in real-time
+  useEffect(() => {
+    setMediaList((prev) => {
+      const incomingMedia = getSampleMediaFiles(photos, recordings);
+      const existingIds = new Set(prev.map((m) => m.id));
+      const newlyAdded = incomingMedia.filter((m) => !existingIds.has(m.id));
+
+      if (newlyAdded.length === 0) return prev;
+      return [...newlyAdded, ...prev];
+    });
+  }, [photos, recordings]);
 
   const selectedFileIds = selectedItemIds.filter((id) => !id.startsWith('folder_'));
 
@@ -641,6 +687,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       setIsAiStartingBubbleOpen(false);
       setSelectedItemIds([]);
       setIsSelectionMode(false);
+      setIsReorderMode(false);
       
       // ✨ AI 시작 직후 바로 실시간 프로세스 화면으로 이동하여 진행/오류 여부를 확인하게 함
       setIsSettingsOpen(true);
@@ -850,6 +897,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     }
     if (activeMode !== 'selection') {
       setIsSelectionMode(false);
+      setIsReorderMode(false);
       setSelectedItemIds([]);
     }
     if (activeMode !== 'fileAdd') {
@@ -909,21 +957,29 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     });
   }, [mediaList, selectedFileIds]);
 
+  // Reset selection mode, reorder mode, selected items, and new upload badges when closing or switching views
+  React.useEffect(() => {
+    if (!isOpen) {
+      setIsSelectionMode(false);
+      setSelectedItemIds([]);
+      setIsReorderMode(false);
+      setReorderEntries([]);
+      setNewlyUploadedIds([]);
+      setIsMoreMenuOpen(false);
+      setIsSearchOpen(false);
+      setSearchQuery('');
+      setIsPathExpanded(false);
+    }
+  }, [isOpen]);
+
   // Reset selection state when switching views (AI Center / Settings tab changes)
   React.useEffect(() => {
     setIsSelectionMode(false);
     setSelectedItemIds([]);
+    setIsReorderMode(false);
   }, [activeSettingDetail, isSettingsOpen]);
 
-  // Re-sync photos, recordings and persisted AI docs when modal opens or files change
-  React.useEffect(() => {
-    if (isOpen) {
-      setMediaList([
-        ...getPersistedAiDocs(),
-        ...getSampleMediaFiles(photos, recordings),
-      ]);
-    }
-  }, [isOpen, photos, recordings]);
+
 
   // Reset path expansion on navPath change
   React.useEffect(() => {
@@ -1197,6 +1253,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       }
       return true;
     });
+
+    // Explicitly sort files by timestamp descending (newest on top, following reordered timestamps)
+    return [...list].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [filteredOrganizedFiles, storageMode, currentYear, currentLevel1, currentLevel2, currentLevel3, currentLevel4, searchQuery]);
 
   // Distinct detected dates in pending files
@@ -1351,6 +1410,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     }
 
     setMediaList((prev) => [...newSavedFiles, ...prev]);
+    setNewlyUploadedIds(newSavedFiles.map(f => f.id));
     setPendingImportFiles([]);
     setShowAddConfirmModal(false);
   };
@@ -1614,7 +1674,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         />
 
         {/* Selection Mode Notice Banner (Camera Floating Style) */}
-        {isSelectionMode && (
+        {(isSelectionMode || isReorderMode) && (
           <div className="px-5 pt-3 pb-0">
             <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-md rounded-full px-4 py-2 flex items-center justify-between text-xs text-neutral-800">
               <div className="flex items-center gap-2">
@@ -1624,6 +1684,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               <button
                 onClick={() => {
                   setIsSelectionMode(false);
+      setIsReorderMode(false);
                   setSelectedItemIds([]);
                   showToast('선택 모드가 종료되었습니다.');
                 }}
@@ -1820,10 +1881,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           ) : isAudio ? (
                             <button
                               onClick={(e) => {
-                                if (isSelectionMode) {
-                                  e.stopPropagation();
-                                  handleFileHoldSelect(item.id);
-                                } else {
+                                if (!isSelectionMode) {
                                   e.stopPropagation();
                                   handleAudioPlayToggle(item.id, item.name);
                                 }
@@ -1923,11 +1981,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderHoldSelect(folderId, { year: yr });
-                          }}
-                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all pointer-events-none whitespace-nowrap ${
                             isSelected 
                               ? 'bg-neutral-900 text-white border-neutral-900' 
                               : hasSelectedItems 
@@ -1980,11 +2034,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderHoldSelect(folderId, { year: currentYear!, l1: item });
-                          }}
-                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all pointer-events-none whitespace-nowrap ${
                             isSelected 
                               ? 'bg-neutral-900 text-white border-neutral-900' 
                               : hasSelectedItems 
@@ -2040,11 +2090,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderHoldSelect(folderId, { year: currentYear!, l1: currentLevel1!, l2: mo });
-                          }}
-                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all pointer-events-none whitespace-nowrap ${
                             isSelected 
                               ? 'bg-neutral-900 text-white border-neutral-900' 
                               : hasSelectedItems 
@@ -2086,11 +2132,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderHoldSelect(folderId, { year: currentYear!, l1: currentLevel1!, l2: sub });
-                          }}
-                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all pointer-events-none whitespace-nowrap ${
                             isSelected 
                               ? 'bg-neutral-900 text-white border-neutral-900' 
                               : hasSelectedItems 
@@ -2146,11 +2188,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderHoldSelect(folderId, { year: currentYear!, l1: currentLevel1!, l2: currentLevel2!, l3: dy });
-                          }}
-                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all pointer-events-none whitespace-nowrap ${
                             isSelected 
                               ? 'bg-neutral-900 text-white border-neutral-900' 
                               : hasSelectedItems 
@@ -2192,11 +2230,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderHoldSelect(folderId, { year: currentYear!, l1: currentLevel1!, l2: mo });
-                          }}
-                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all pointer-events-none whitespace-nowrap ${
                             isSelected 
                               ? 'bg-neutral-900 text-white border-neutral-900' 
                               : hasSelectedItems 
@@ -2264,11 +2298,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderHoldSelect(folderId, { year: currentYear!, l1: currentLevel1!, l2: currentLevel2!, l3: currentLevel3!, l4: dy });
-                          }}
-                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all pointer-events-none whitespace-nowrap ${
                             isSelected 
                               ? 'bg-neutral-900 text-white border-neutral-900' 
                               : hasSelectedItems 
@@ -2303,6 +2333,166 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       오른쪽 상단 + 버튼을 눌러 테스트용 파일이나 녹음을 추가해보세요.
                     </p>
                   </div>
+                ) : isReorderMode ? (
+                  <div className="col-span-full space-y-4">
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-2xl p-4 flex items-center justify-between text-xs text-blue-950 shadow-2xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
+                        <div>
+                          <p className="font-bold">순서 변경 모드 (다중 묶음 이동 지원)</p>
+                          <p className="text-[11px] text-blue-700 mt-0.5">선택한 파일 묶음이나 개별 카드를 원하는 위치로 끌어당기세요</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Reorder.Group
+                      axis="y"
+                      values={reorderEntries}
+                      onReorder={setReorderEntries}
+                      className="flex flex-col gap-3 relative select-none touch-none"
+                    >
+                      {reorderEntries.map((entry, idx) => {
+                        const isBundle = entry.type === 'bundle';
+
+                        if (isBundle) {
+                          const bundleCount = entry.files.length;
+                          const firstFile = entry.files[0];
+
+                          return (
+                            <Reorder.Item
+                              key={entry.id}
+                              value={entry}
+                              className="relative z-50 cursor-grab active:cursor-grabbing rounded-2xl bg-gradient-to-r from-blue-50/90 to-indigo-50/60 border-2 border-blue-500 p-3.5 shadow-sm transition-all flex items-center justify-between gap-3 select-none touch-none active:shadow-xl active:scale-[1.02] ring-2 ring-blue-500/20"
+                              whileDrag={{
+                                scale: 1.04,
+                                boxShadow: "0 20px 25px -5px rgba(37, 99, 235, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                                zIndex: 99
+                              }}
+                            >
+                              <div className="flex items-center gap-3 overflow-hidden min-w-0 flex-1 pointer-events-none">
+                                {/* Order Number Badge */}
+                                <div className="w-6 h-6 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center flex-shrink-0 shadow-2xs">
+                                  {idx + 1}
+                                </div>
+
+                                {/* Bundle Icon with prominent file count */}
+                                <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border-2 border-blue-500 bg-neutral-900 shadow-sm flex items-center justify-center">
+                                  {firstFile.type === 'photo' && firstFile.dataUrl ? (
+                                    <img
+                                      src={firstFile.dataUrl}
+                                      alt={firstFile.name}
+                                      className="absolute inset-0 w-full h-full object-cover opacity-50 blur-[0.5px]"
+                                    />
+                                  ) : (
+                                    <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-indigo-700 opacity-90" />
+                                  )}
+                                  <div className="relative z-10 flex items-center justify-center text-white drop-shadow-md">
+                                    <span className="text-sm font-black tracking-tight">{bundleCount}</span>
+                                  </div>
+                                </div>
+
+                                {/* File Details */}
+                                <div className="truncate min-w-0 flex-1">
+                                  <p className="text-xs font-bold truncate text-neutral-900 flex items-center gap-1.5">
+                                    <span>{firstFile.name}</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[9px] font-black tracking-wider leading-none">
+                                      {bundleCount}개 묶음
+                                    </span>
+                                  </p>
+                                  <p className="text-[10px] text-blue-600 font-medium mt-0.5 truncate">
+                                    {new Date(firstFile.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} • 통째로 이동
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Drag Handle Icon */}
+                              <div className="p-2 text-blue-600 flex-shrink-0 flex items-center justify-center pointer-events-none">
+                                <svg viewBox="0 0 24 24" className="w-5 h-5 stroke-[2.2]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                                  <line x1="4" y1="9" x2="20" y2="9" />
+                                  <line x1="4" y1="15" x2="20" y2="15" />
+                                </svg>
+                              </div>
+                            </Reorder.Item>
+                          );
+                        }
+
+                        // Single item rendering
+                        const item = entry.files[0];
+                        const isPhoto = item.type === 'photo';
+                        const isAudio = item.type === 'audio';
+                        const isNew = newlyUploadedIds.includes(item.id);
+
+                        return (
+                          <Reorder.Item
+                            key={entry.id}
+                            value={entry}
+                            className="relative z-50 cursor-grab active:cursor-grabbing rounded-2xl bg-white border border-neutral-200/90 p-3.5 shadow-sm transition-shadow flex items-center justify-between gap-3 select-none touch-none active:shadow-xl active:scale-[1.02] active:border-blue-500"
+                            whileDrag={{
+                              scale: 1.04,
+                              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                              zIndex: 99
+                            }}
+                          >
+                            <div className="flex items-center gap-3 overflow-hidden min-w-0 flex-1 pointer-events-none">
+                              {/* Order Number Badge */}
+                              <div className="w-6 h-6 rounded-full bg-neutral-100 border border-neutral-200/80 text-neutral-700 text-[11px] font-black flex items-center justify-center flex-shrink-0">
+                                {idx + 1}
+                              </div>
+
+                              {/* Thumbnail */}
+                              {isPhoto ? (
+                                item.dataUrl ? (
+                                  <img
+                                    src={item.dataUrl}
+                                    alt={item.name}
+                                    className="w-10 h-10 rounded-xl object-cover flex-shrink-0 border border-neutral-200"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-xl bg-neutral-100 flex items-center justify-center flex-shrink-0">
+                                    <ImageIcon className="w-5 h-5 text-neutral-400" />
+                                  </div>
+                                )
+                              ) : isAudio ? (
+                                <div className="w-10 h-10 rounded-xl bg-neutral-100 flex items-center justify-center flex-shrink-0 text-neutral-600">
+                                  <Mic className="w-5 h-5" />
+                                </div>
+                              ) : (
+                                <div className="w-10 h-10 rounded-xl bg-neutral-100 flex items-center justify-center flex-shrink-0 text-neutral-600">
+                                  <FileText className="w-5 h-5" />
+                                </div>
+                              )}
+
+                              {/* File Details */}
+                              <div className="truncate min-w-0 flex-1">
+                                <p className="text-xs font-bold truncate text-neutral-900 flex items-center gap-1.5">
+                                  <span>{item.name}</span>
+                                  {isNew && (
+                                    <span className="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[9px] font-black tracking-wider leading-none">
+                                      NEW
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="text-[10px] text-neutral-400 mt-0.5 truncate">
+                                  {new Date(item.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Drag Handle Icon */}
+                            <div className="p-2 text-neutral-400 hover:text-neutral-700 flex-shrink-0 flex items-center justify-center pointer-events-none">
+                              <svg viewBox="0 0 24 24" className="w-5 h-5 stroke-[2.2]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="4" y1="9" x2="20" y2="9" />
+                                <line x1="4" y1="15" x2="20" y2="15" />
+                              </svg>
+                            </div>
+                          </Reorder.Item>
+                        );
+                      })}
+                    </Reorder.Group>
+
+                    {/* Bottom Spacing to ensure smooth scrolling above floating toolbar */}
+                    <div className="h-32 w-full pointer-events-none" />
+                  </div>
                 ) : (
                   dayFiles.map((item) => {
                     const isPhoto = item.type === 'photo';
@@ -2332,6 +2522,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         className={`h-full p-3.5 rounded-2xl border transition-all flex items-center justify-between shadow-2xs text-neutral-800 cursor-pointer ${
                           isSelected
                             ? 'border-neutral-900 bg-neutral-50 shadow-xs'
+                            : newlyUploadedIds.includes(item.id)
+                            ? 'border-blue-500 ring-2 ring-blue-500/40 bg-blue-50/40 shadow-sm'
                             : 'bg-white border-neutral-200/80 hover:border-neutral-300'
                         }`}
                       >
@@ -2344,10 +2536,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                 src={item.dataUrl}
                                 alt={item.name}
                                 onClick={(e) => {
-                                  if (isSelectionMode) {
-                                    e.stopPropagation();
-                                    handleFileHoldSelect(item.id);
-                                  } else {
+                                  if (!isSelectionMode) {
                                     e.stopPropagation();
                                     setPreviewPhoto(item);
                                   }
@@ -2365,10 +2554,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           ) : isAudio ? (
                             <button
                               onClick={(e) => {
-                                if (isSelectionMode) {
-                                  e.stopPropagation();
-                                  handleFileHoldSelect(item.id);
-                                } else {
+                                if (!isSelectionMode) {
                                   e.stopPropagation();
                                   handleAudioPlayToggle(item.id, item.name);
                                 }
@@ -2393,8 +2579,13 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
                           {/* File Details */}
                           <div className="truncate">
-                            <h5 className="text-xs font-bold truncate text-neutral-900">
-                              {item.name}
+                            <h5 className="text-xs font-bold truncate text-neutral-900 flex items-center gap-1.5">
+                              <span>{item.name}</span>
+                              {newlyUploadedIds.includes(item.id) && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-[9px] font-black tracking-wider leading-none shadow-xs">
+                                  NEW
+                                </span>
+                              )}
                             </h5>
 
                             <div className="flex items-center gap-2 mt-1 text-[10px] text-neutral-400">
@@ -2853,7 +3044,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       </div>
 
                       {/* Selection Mode Notice Banner in AI Center */}
-                      {isSelectionMode && (
+                      {(isSelectionMode || isReorderMode) && (
                         <div className="bg-neutral-900 text-white border border-neutral-800 shadow-md rounded-2xl px-4 py-2.5 flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             <span className="w-2.5 h-2.5 rounded-full bg-neutral-300 animate-pulse flex-shrink-0" />
@@ -2862,6 +3053,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           <button
                             onClick={() => {
                               setIsSelectionMode(false);
+      setIsReorderMode(false);
                               setSelectedItemIds([]);
                               showToast('선택 모드가 종료되었습니다.');
                             }}
@@ -3270,7 +3462,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
         {/* Multi-Selection Mode Bottom Floating Action Toolbar */}
         <AnimatePresence>
-          {isSelectionMode && (
+          {(isSelectionMode || isReorderMode) && (
             <motion.div
               initial={{ y: 80, opacity: 0, x: '-50%' }}
               animate={{ y: 0, opacity: 1, x: '-50%' }}
@@ -3310,6 +3502,91 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     title="AI 스마트 요약"
                   >
                     <Sparkles className="w-6 h-6 stroke-[2]" style={{ color: accentColor }} />
+                  </button>
+                )}
+
+                {/* 2.2 순서 바꾸기 / 완료 버튼 */}
+                {activeSettingDetail !== 'ai_center' && !hasSelectedAiDocs && (
+                  <button
+                    onClick={() => {
+                      if (isReorderMode) {
+                        if (reorderEntries.length > 0) {
+                          const flattenedFiles = reorderEntries.flatMap((entry) => entry.files);
+                          const timestamps = dayFiles.map((f) => new Date(f.timestamp).getTime()).filter((t) => !isNaN(t) && t > 0);
+                          const baseTime = timestamps.length > 0 ? Math.max(...timestamps) : Date.now();
+
+                          const updatedFiles = flattenedFiles.map((f, i) => ({
+                            ...f,
+                            timestamp: new Date(baseTime - i * 1000),
+                          }));
+
+                          setMediaList((prev) => {
+                            const others = prev.filter((p) => !updatedFiles.some((u) => u.id === p.id));
+                            return [...updatedFiles, ...others];
+                          });
+
+                          showToast(`🎉 ${flattenedFiles.length}개 파일 순서가 적용되었습니다!`);
+                        }
+                        setIsReorderMode(false);
+                        setIsSelectionMode(false);
+                        setSelectedItemIds([]);
+                        return;
+                      }
+
+                      // Enter reorder mode
+                      if (dayFiles.length <= 1) {
+                        showToast('순서를 바꿀 파일이 2개 이상이어야 합니다.');
+                        return;
+                      }
+
+                      const selectedFiles = dayFiles.filter((f) => selectedItemIds.includes(f.id));
+                      const unselectedFiles = dayFiles.filter((f) => !selectedItemIds.includes(f.id));
+
+                      let entries: Array<{ id: string; type: 'bundle' | 'single'; files: MediaFile[] }> = [];
+
+                      if (selectedFiles.length > 0) {
+                        const bundleEntry = {
+                          id: 'bundle_selected_items',
+                          type: 'bundle' as const,
+                          files: selectedFiles,
+                        };
+
+                        const firstSelectedIndex = dayFiles.findIndex((f) => selectedItemIds.includes(f.id));
+                        const otherEntries = unselectedFiles.map((f) => ({
+                          id: f.id,
+                          type: 'single' as const,
+                          files: [f],
+                        }));
+
+                        const insertIdx = firstSelectedIndex >= 0 ? Math.min(firstSelectedIndex, otherEntries.length) : 0;
+                        otherEntries.splice(insertIdx, 0, bundleEntry);
+                        entries = otherEntries;
+                      } else {
+                        entries = dayFiles.map((f) => ({
+                          id: f.id,
+                          type: 'single' as const,
+                          files: [f],
+                        }));
+                      }
+
+                      setReorderEntries(entries);
+                      setIsReorderMode(true);
+                      if (selectedFiles.length > 1) {
+                        showToast(`📦 ${selectedFiles.length}개 파일이 묶였습니다. 위치를 잡은 후 이 버튼을 한 번 더 누르면 완료됩니다.`);
+                      } else {
+                        showToast('카드를 원하는 위치로 드래그한 후 이 버튼을 한 번 더 누르면 완료됩니다.');
+                      }
+                    }}
+                    className={`w-14 h-14 rounded-full border-2 ring-2 transition-all flex items-center justify-center shadow-md ${
+                      isReorderMode 
+                        ? 'bg-blue-600 border-blue-500 ring-blue-400 text-white shadow-blue-500/50 animate-pulse' 
+                        : 'bg-white border-neutral-200 ring-neutral-200/60 text-neutral-800 hover:text-black active:scale-90'
+                    }`}
+                    title={isReorderMode ? "순서 변경 완료 및 적용" : "순서 바꾸기"}
+                  >
+                    <svg viewBox="0 0 24 24" className="w-6 h-6 stroke-[2]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 8h16M4 16h16M8 4l-4 4 4 4M16 20l4-4-4-4" />
+                    </svg>
                   </button>
                 )}
 

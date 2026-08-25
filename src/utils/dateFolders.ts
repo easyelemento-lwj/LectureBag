@@ -87,27 +87,32 @@ export function formatFileName(dateInput: Date | string): string {
   const dd = String(validDate.getDate()).padStart(2, '0');
   const hh = String(validDate.getHours()).padStart(2, '0');
   const min = String(validDate.getMinutes()).padStart(2, '0');
-  return `${yyyy}${mm}${dd}_${hh}${min}`;
+  const ss = String(validDate.getSeconds()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}_${hh}${min}${ss}`;
 }
 
 // Generate realistic media files from actual user photos & recordings
 export function getSampleMediaFiles(capturedPhotos: CapturedPhoto[], recordings: RecordedAudio[] = []): MediaFile[] {
-  const convertedPhotos: MediaFile[] = capturedPhotos.map((p) => {
-    const fileName = formatFileName(p.timestamp);
-    return {
-      id: p.id,
-      type: 'photo',
-      name: `${fileName}.jpg`,
-      dataUrl: p.dataUrl,
-      fileSize: '2.4 MB',
-      timestamp: p.timestamp,
-      mode: p.mode || 'PPT/판서',
-    };
-  });
+  const usedNames = new Set<string>();
+
+  const getUniqueName = (baseName: string, ext: string) => {
+    let finalName = `${baseName}.${ext}`;
+    let counter = 1;
+    while (usedNames.has(finalName)) {
+      finalName = `${baseName}_${String(counter).padStart(2, '0')}.${ext}`;
+      counter++;
+    }
+    usedNames.add(finalName);
+    return finalName;
+  };
 
   const convertedRecordings: MediaFile[] = recordings.map((r) => {
-    const fileName = formatFileName(r.timestamp);
-    const resolvedName = r.name && r.name.match(/^\d{8}_\d{4}/) ? r.name : `${fileName}.m4a`;
+    const baseName = formatFileName(r.timestamp);
+    // Legacy support for older names
+    const resolvedName = r.name && r.name.match(/^\d{8}_\d+/) 
+      ? getUniqueName(r.name.replace(/\.m4a$/, ''), 'm4a') 
+      : getUniqueName(baseName, 'm4a');
+      
     return {
       id: r.id,
       type: 'audio',
@@ -116,6 +121,20 @@ export function getSampleMediaFiles(capturedPhotos: CapturedPhoto[], recordings:
       fileSize: r.size || '12.4 MB',
       timestamp: r.timestamp,
       mode: '강의 녹음',
+    };
+  });
+
+  const convertedPhotos: MediaFile[] = capturedPhotos.map((p) => {
+    const baseName = formatFileName(p.timestamp);
+    const uniqueName = getUniqueName(baseName, 'jpg');
+    return {
+      id: p.id,
+      type: 'photo',
+      name: uniqueName,
+      dataUrl: p.dataUrl,
+      fileSize: '2.4 MB',
+      timestamp: p.timestamp,
+      mode: p.mode || 'PPT/판서',
     };
   });
 

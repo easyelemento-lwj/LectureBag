@@ -88,15 +88,22 @@ export function useAppState() {
       const saved = localStorage.getItem('lecture_snap_photos');
       if (saved) {
         const parsed: CapturedPhoto[] = JSON.parse(saved);
-        // Migrate: 기존 저장 항목의 id·folderName을 YYYYMMDD_HHmm 포맷으로 통일
+        // Migrate & Deduplicate
+        const seenIds = new Set<string>();
         return parsed.map((p) => {
           const ts = p.timestamp ?? new Date();
           const name = formatFileName(ts);
+          let uniqueId = p.id;
+          
+          // If collision or using the old non-unique YYYYMMDD_HHmm format
+          if (seenIds.has(uniqueId) || /^photo_\d{8}_\d{4}$/.test(uniqueId) || /^photo_\d{8}_\d{6}$/.test(uniqueId)) {
+            uniqueId = `photo_${name}_${Math.floor(Math.random() * 100000)}`;
+          }
+          seenIds.add(uniqueId);
+          
           return {
             ...p,
-            id: p.id.startsWith('photo_') && !/^photo_\d{8}_\d{4}$/.test(p.id)
-              ? `photo_${name}`
-              : p.id,
+            id: uniqueId,
             folderName: p.folderName ?? name,
           };
         });
@@ -128,16 +135,22 @@ export function useAppState() {
       const saved = localStorage.getItem('lecture_snap_recordings');
       if (saved) {
         const parsed: RecordedAudio[] = JSON.parse(saved);
-        // Migrate: 기존 name이 구형 포맷이면 YYYYMMDD_HHmm.m4a 로 변환
+        // Migrate & Deduplicate
+        const seenIds = new Set<string>();
         return parsed.map((r) => {
           const ts = r.timestamp ?? new Date();
           const name = formatFileName(ts);
           const needsMigration = !r.name.match(/^\d{8}_\d{4}/);
+          let uniqueId = r.id;
+          
+          if (seenIds.has(uniqueId) || /^rec_\d{8}_\d{4}$/.test(uniqueId) || /^rec_\d{8}_\d{6}$/.test(uniqueId)) {
+            uniqueId = `rec_${name}_${Math.floor(Math.random() * 100000)}`;
+          }
+          seenIds.add(uniqueId);
+          
           return {
             ...r,
-            id: r.id.startsWith('rec_') && !/^rec_\d{8}_\d{4}$/.test(r.id)
-              ? `rec_${name}`
-              : r.id,
+            id: uniqueId,
             name: needsMigration ? `${name}.m4a` : r.name,
           };
         });
@@ -307,9 +320,9 @@ export function useAppState() {
     e?.stopPropagation();
     if (recordingSeconds > 0) {
       const now = new Date();
-      const fileName = formatFileName(now); // e.g. '20260816_1443'
+      const fileName = formatFileName(now);
       const newRec: RecordedAudio = {
-        id: `rec_${fileName}`,
+        id: `rec_${now.getTime()}_${Math.floor(Math.random() * 1000)}`,
         name: `${fileName}.m4a`,
         duration: formatRecordingTime(recordingSeconds),
         timestamp: now.toISOString(),
@@ -410,9 +423,9 @@ export function useAppState() {
 
     if (dataUrl) {
       const now = new Date();
-      const fileName = formatFileName(now); // e.g. '20260816_1443'
+      const fileName = formatFileName(now);
       const newPhoto: CapturedPhoto = {
-        id: `photo_${fileName}`,
+        id: `photo_${now.getTime()}_${Math.floor(Math.random() * 1000)}`,
         dataUrl,
         timestamp: now,
         mode: 'PPT/판서',
