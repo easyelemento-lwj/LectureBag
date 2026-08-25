@@ -64,7 +64,8 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
 }) => {
   const { accentColor } = useAccentColor();
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
-  const simCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const [isLandscape, setIsLandscape] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth > window.innerHeight : false
@@ -78,34 +79,75 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Simulated lecture frame animation for desktop/computer environments
+  // ── 60fps Canvas Direct Render Pipeline ──────────────────────────────────
+  // Bypasses iOS WebKit's <video> hardware letterbox clipping entirely by
+  // painting the video frames directly onto an edge-to-edge HTML5 Canvas surface.
   useEffect(() => {
-    if (cameraStatus === 'live' || isAudioMode) return;
+    if (isAudioMode) return;
 
     let time = 0;
     let animId: number;
-    const renderSim = () => {
+
+    const renderLoop = () => {
       time += 0.025;
-      if (simCanvasRef.current) {
-        const cvs = simCanvasRef.current;
+      const cvs = liveCanvasRef.current;
+      const video = localVideoRef.current;
+
+      if (cvs) {
         const rect = cvs.getBoundingClientRect();
         if (rect.width && rect.height) {
-          if (cvs.width !== rect.width * 2 || cvs.height !== rect.height * 2) {
-            cvs.width = rect.width * 2;
-            cvs.height = rect.height * 2;
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const targetW = Math.round(rect.width * dpr);
+          const targetH = Math.round(rect.height * dpr);
+
+          if (cvs.width !== targetW || cvs.height !== targetH) {
+            cvs.width = targetW;
+            cvs.height = targetH;
           }
-          const ctx = cvs.getContext('2d');
+
+          const ctx = cvs.getContext('2d', { alpha: false });
           if (ctx) {
-            drawSimulatedLectureFrame(ctx, cvs.width, cvs.height, 'PPT/판서', time);
+            if (cameraStatus === 'live' && video && video.readyState >= 2) {
+              const vW = video.videoWidth || 1280;
+              const vH = video.videoHeight || 720;
+              const canvasAspect = targetW / targetH;
+              const videoAspect = vW / vH;
+
+              let sW = vW;
+              let sH = vH;
+              let sX = 0;
+              let sY = 0;
+
+              // Perfect Aspect Fill / Cover Math
+              if (videoAspect > canvasAspect) {
+                sW = vH * canvasAspect;
+                sX = (vW - sW) / 2;
+              } else {
+                sH = vW / canvasAspect;
+                sY = (vH - sH) / 2;
+              }
+
+              ctx.save();
+              if (cameraFacing === 'front') {
+                ctx.translate(targetW, 0);
+                ctx.scale(-1, 1);
+              }
+              ctx.drawImage(video, sX, sY, sW, sH, 0, 0, targetW, targetH);
+              ctx.restore();
+            } else {
+              // Camera loading / simulation animation
+              drawSimulatedLectureFrame(ctx, targetW, targetH, 'PPT/판서', time);
+            }
           }
         }
       }
-      animId = requestAnimationFrame(renderSim);
+
+      animId = requestAnimationFrame(renderLoop);
     };
 
-    renderSim();
+    renderLoop();
     return () => cancelAnimationFrame(animId);
-  }, [cameraStatus, isAudioMode, aspectRatio]);
+  }, [cameraStatus, cameraFacing, isAudioMode, aspectRatio]);
 
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isRecording) return;
@@ -226,44 +268,41 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
       ) : (
         /* ── Normal Camera Viewport Mode (Always Edge-to-Edge Full Screen) ── */
         <div className="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden bg-black">
-          {/* Live Camera Feed or Canvas Simulation - ALWAYS 100% FULL SCREEN */}
+          {/* Hidden Background Video Stream Receiver */}
+          <video
+            ref={(el) => {
+              localVideoRef.current = el;
+              setVideoRef(el);
+            }}
+            autoPlay
+            playsInline
+            muted
+            style={{
+              position: 'fixed',
+              top: -9999,
+              left: -9999,
+              width: 1,
+              height: 1,
+              opacity: 0,
+              pointerEvents: 'none',
+            }}
+          />
+
+          {/* 60fps Fullscreen Canvas Direct Render Viewfinder (100% Edge-to-Edge) */}
           <div className="absolute inset-0 w-full h-full overflow-hidden bg-black">
-            {cameraStatus === 'live' ? (
-              <video
-                ref={setVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`absolute inset-0 w-full h-full object-cover pointer-events-none select-none ${
-                  cameraFacing === 'front' ? 'scale-x-[-1]' : ''
-                }`}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
-              />
-            ) : (
-              <canvas
-                ref={simCanvasRef}
-                className="absolute inset-0 w-full h-full object-cover"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
-              />
-            )}
+            <canvas
+              ref={liveCanvasRef}
+              className="absolute inset-0 w-full h-full object-cover select-none pointer-events-none"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100%',
+                height: '100%',
+              }}
+            />
           </div>
 
           {/* Dynamic Aspect Ratio Guide Frame & 3x3 Grid Overlay */}
