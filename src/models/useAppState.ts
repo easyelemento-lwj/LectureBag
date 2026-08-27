@@ -220,6 +220,10 @@ export function useAppState() {
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
 
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
   // ── Modal Visibility ───────────────────────────────────────────────────
   const [isRecentModalOpen, setIsRecentModalOpen] = useState<boolean>(false);
   const [isRecentRecordingsModalOpen, setIsRecentRecordingsModalOpen] = useState<boolean>(false);
@@ -231,7 +235,7 @@ export function useAppState() {
     // Popup notifications disabled per user request
   }, []);
 
-  // ── Camera stream lifecycle ────────────────────────────────────────────
+  // ── Camera stream lifecycle & Initial Mic Permission ───────────────────
   useEffect(() => {
     let cancelled = false;
 
@@ -264,6 +268,22 @@ export function useAppState() {
           videoRef.current.onloadedmetadata = () => { videoRef.current?.play().catch(() => {}); };
         }
         setCameraStatus('live');
+
+        // 순차적 권한 요청: 카메라 권한이 승인된 후, 마이크 권한이 아직 요청되지 않은 경우 마이크 권한 요청
+        const micPerm = localStorage.getItem('lecture_bag_mic_permission');
+        if (!micPerm && navigator.mediaDevices?.getUserMedia) {
+          setTimeout(async () => {
+            try {
+              const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              audioStream.getTracks().forEach((t) => t.stop());
+              localStorage.setItem('lecture_bag_mic_permission', 'granted');
+            } catch (micErr: any) {
+              if (micErr?.name === 'NotAllowedError' || micErr?.name === 'PermissionDeniedError') {
+                localStorage.setItem('lecture_bag_mic_permission', 'denied');
+              }
+            }
+          }, 300);
+        }
       } catch (err: unknown) {
         if (cancelled) return;
         const error = err as { name?: string };
@@ -283,6 +303,13 @@ export function useAppState() {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
     };
   }, []);
 
@@ -335,33 +362,121 @@ export function useAppState() {
     return `${m}:${s}`;
   }, []);
 
-  const handleStartRecording = useCallback((e?: React.MouseEvent) => {
+  const handleStartRecording = useCallback(async (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setIsAudioMode(true);
-    setIsRecording(true);
-    setIsPaused(false);
-    setRecordingSeconds(0);
+    try {
+      // 1. 기기 마이크 오디오 스트림 획득
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      // 2. 브라우저 지원 코덱 설정
+      let options: MediaRecorderOptions = {};
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          options = { mimeType: 'audio/webm;codecs=opus' };
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          options = { mimeType: 'audio/mp4' };
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          options = { mimeType: 'audio/webm' };
+        }
+      }
+
+      const recorder = new MediaRecorder(stream, options);
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.start(500); // 500ms 단위로 chunk 수집
+      mediaRecorderRef.current = recorder;
+
+      setIsAudioMode(true);
+      setIsRecording(true);
+      setIsPaused(false);
+      setRecordingSeconds(0);
+      localStorage.setItem('lecture_bag_mic_permission', 'granted');
+    } catch (err: any) {
+      console.error('Failed to access microphone:', err);
+      alert('마이크 접근 권한이 필요합니다. 기기 설정에서 마이크를 허용해주세요.');
+    }
   }, []);
 
   const handleTogglePauseRecording = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setIsPaused((prev) => !prev);
+    const recorder = mediaRecorderRef.current;
+    if (recorder) {
+      if (recorder.state === 'recording') {
+        recorder.pause();
+        setIsPaused(true);
+      } else if (recorder.state === 'paused') {
+        recorder.resume();
+        setIsPaused(false);
+      }
+    } else {
+      setIsPaused((prev) => !prev);
+    }
   }, []);
 
   const handleStopRecording = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (recordingSeconds > 0) {
-      const now = new Date();
-      const fileName = formatFileName(now);
-      const newRec: RecordedAudio = {
-        id: `rec_${now.getTime()}_${Math.floor(Math.random() * 1000)}`,
-        name: `${fileName}.m4a`,
-        duration: formatRecordingTime(recordingSeconds),
-        timestamp: now.toISOString(),
-        size: `${(Math.max(1, recordingSeconds) * 0.12).toFixed(1)} MB`,
+    const recorder = mediaRecorderRef.current;
+    const stream = audioStreamRef.current;
+    const finalSeconds = recordingSeconds;
+
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const sizeMB = (audioBlob.size / (1024 * 1024)).toFixed(1);
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          const now = new Date();
+          const fileName = formatFileName(now);
+          const newRec: RecordedAudio = {
+            id: `rec_${now.getTime()}_${Math.floor(Math.random() * 1000)}`,
+            name: `${fileName}.m4a`,
+            duration: formatRecordingTime(finalSeconds > 0 ? finalSeconds : 1),
+            timestamp: now.toISOString(),
+            size: `${sizeMB === '0.0' ? '0.1' : sizeMB} MB`,
+            dataUrl: dataUrl,
+          };
+          setRecordings((prev) => [newRec, ...prev]);
+        };
+        reader.readAsDataURL(audioBlob);
+
+        // 오디오 트랙 해제
+        if (stream) {
+          stream.getTracks().forEach((t) => t.stop());
+          audioStreamRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
       };
-      setRecordings((prev) => [newRec, ...prev]);
+
+      recorder.stop();
+    } else {
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+      }
+      if (finalSeconds > 0) {
+        const now = new Date();
+        const fileName = formatFileName(now);
+        const newRec: RecordedAudio = {
+          id: `rec_${now.getTime()}_${Math.floor(Math.random() * 1000)}`,
+          name: `${fileName}.m4a`,
+          duration: formatRecordingTime(finalSeconds),
+          timestamp: now.toISOString(),
+          size: `${(Math.max(1, finalSeconds) * 0.12).toFixed(1)} MB`,
+        };
+        setRecordings((prev) => [newRec, ...prev]);
+      }
     }
+
     setIsRecording(false);
     setIsPaused(false);
     setRecordingSeconds(0);

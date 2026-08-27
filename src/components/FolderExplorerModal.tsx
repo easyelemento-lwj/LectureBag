@@ -1622,11 +1622,41 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     setShowAddConfirmModal(false);
   };
 
-  const handleAudioPlayToggle = (id: string, name: string) => {
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleAudioPlayToggle = (id: string, name: string, dataUrl?: string) => {
     if (playingAudioId === id) {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
       setPlayingAudioId(null);
       showToast('녹음 재생이 일시정지 되었습니다');
     } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      if (dataUrl) {
+        try {
+          const audio = new Audio(dataUrl);
+          audio.onended = () => setPlayingAudioId(null);
+          audio.onerror = () => setPlayingAudioId(null);
+          audio.play().catch((err) => {
+            console.error('Audio playback error:', err);
+          });
+          audioPlayerRef.current = audio;
+        } catch (e) {
+          console.error(e);
+        }
+      }
       setPlayingAudioId(id);
       showToast(`'${name}' 녹음 재생 중...`);
     }
@@ -2077,7 +2107,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           if (isPhoto) {
                             setPreviewPhoto(item);
                           } else if (isAudio) {
-                            handleAudioPlayToggle(item.id, item.name);
+                            handleAudioPlayToggle(item.id, item.name, item.dataUrl);
                           } else {
                             setPreviewDoc(item);
                           }
@@ -2105,7 +2135,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               onClick={(e) => {
                                 if (!isSelectionMode) {
                                   e.stopPropagation();
-                                  handleAudioPlayToggle(item.id, item.name);
+                                  handleAudioPlayToggle(item.id, item.name, item.dataUrl);
                                 }
                               }}
                               className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all active:scale-90 ${
@@ -2736,7 +2766,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           if (isPhoto) {
                             setPreviewPhoto(item);
                           } else if (isAudio) {
-                            handleAudioPlayToggle(item.id, item.name);
+                            handleAudioPlayToggle(item.id, item.name, item.dataUrl);
                           } else {
                             setPreviewDoc(item);
                           }
@@ -2778,7 +2808,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               onClick={(e) => {
                                 if (!isSelectionMode) {
                                   e.stopPropagation();
-                                  handleAudioPlayToggle(item.id, item.name);
+                                  handleAudioPlayToggle(item.id, item.name, item.dataUrl);
                                 }
                               }}
                               className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all active:scale-90 ${

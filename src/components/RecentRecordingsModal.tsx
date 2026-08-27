@@ -57,10 +57,65 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [isSelectMode, setIsSelectMode] = useState<boolean>(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const audioPlayerRef = React.useRef<HTMLAudioElement | null>(null);
 
-  // Timer effect to advance current time smoothly when playing
+  // Stop audio on unmount or modal close
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+    };
+  }, [isOpen]);
+
+  // Handle actual audio player lifecycle and sync
+  useEffect(() => {
+    if (!expandedId) {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+      setIsPlaying(false);
+      return;
+    }
+
+    const activeRec = recordings.find((r) => r.id === expandedId);
+    if (!activeRec?.dataUrl) return;
+
+    if (!audioPlayerRef.current || audioPlayerRef.current.src !== activeRec.dataUrl) {
+      if (audioPlayerRef.current) audioPlayerRef.current.pause();
+      const audio = new Audio(activeRec.dataUrl);
+      audio.onended = () => {
+        setIsPlaying(false);
+        setCurrentTimeMap((prev) => ({ ...prev, [expandedId]: 0 }));
+      };
+      audio.ontimeupdate = () => {
+        setCurrentTimeMap((prev) => ({ ...prev, [expandedId]: audio.currentTime }));
+      };
+      audioPlayerRef.current = audio;
+    }
+  }, [expandedId, recordings]);
+
+  // Sync isPlaying with audioPlayerRef
+  useEffect(() => {
+    if (audioPlayerRef.current && expandedId) {
+      if (isPlaying) {
+        audioPlayerRef.current.play().catch((err) => {
+          console.error('Audio play error:', err);
+          setIsPlaying(false);
+        });
+      } else {
+        audioPlayerRef.current.pause();
+      }
+    }
+  }, [isPlaying, expandedId]);
+
+  // Fallback timer effect if no real dataUrl exists
   useEffect(() => {
     if (!isPlaying || !expandedId) return;
+    const activeRec = recordings.find((r) => r.id === expandedId);
+    if (activeRec?.dataUrl) return; // Handled by ontimeupdate
 
     let lastTime = Date.now();
     const interval = setInterval(() => {
@@ -69,7 +124,6 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
       lastTime = now;
 
       setCurrentTimeMap((prev) => {
-        const activeRec = recordings.find((r) => r.id === expandedId);
         const maxSec = parseDuration(activeRec?.duration);
         const current = prev[expandedId] || 0;
 
@@ -108,6 +162,9 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
   const handleSeek = (id: string, newTime: number, e?: React.ChangeEvent<HTMLInputElement>) => {
     e?.stopPropagation();
     setCurrentTimeMap((prev) => ({ ...prev, [id]: newTime }));
+    if (audioPlayerRef.current && expandedId === id) {
+      audioPlayerRef.current.currentTime = newTime;
+    }
   };
 
   const handleSkip = (id: string, seconds: number, e: React.MouseEvent) => {
@@ -117,6 +174,9 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
     setCurrentTimeMap((prev) => {
       const current = prev[id] || 0;
       const updated = Math.max(0, Math.min(maxSec, current + seconds));
+      if (audioPlayerRef.current && expandedId === id) {
+        audioPlayerRef.current.currentTime = updated;
+      }
       return { ...prev, [id]: updated };
     });
   };

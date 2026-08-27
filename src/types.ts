@@ -26,6 +26,7 @@ export interface RecordedAudio {
   duration: string;
   timestamp: Date | string;
   size?: string;
+  dataUrl?: string;
 }
 
 export type FlashMode = 'off' | 'on' | 'auto';
