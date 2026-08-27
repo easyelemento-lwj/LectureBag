@@ -39,8 +39,9 @@ import {
   CheckCircle2,
   Activity
 } from 'lucide-react';
-import { CapturedPhoto, MediaFile, RecordedAudio, TimetableEntry } from '../types';
+import { CapturedPhoto, MediaFile, RecordedAudio, TimetableEntry, SemesterTimetable } from '../types';
 import { getFolderHierarchyFromDate, getSampleMediaFiles, extractSmartFileDate } from '../utils/dateFolders';
+
 import { useAccentColor } from '../context/AccentColorContext';
 import { analyzeTimetableImage, generateAiSummary } from '../utils/gemini';
 import { MarkdownViewer } from './MarkdownViewer';
@@ -86,8 +87,8 @@ interface FolderExplorerModalProps {
   setTimetableImage: React.Dispatch<React.SetStateAction<string | null>>;
   storageMode: 'default' | 'timetable';
   setStorageMode: React.Dispatch<React.SetStateAction<'default' | 'timetable'>>;
-  timetableEntries: TimetableEntry[];
-  setTimetableEntries: React.Dispatch<React.SetStateAction<TimetableEntry[]>>;
+  timetables: SemesterTimetable[];
+  setTimetables: React.Dispatch<React.SetStateAction<SemesterTimetable[]>>;
 }
 
 // ── Custom iOS Floating Glassmorphism Calendar Popover ────────────────────────
@@ -183,7 +184,7 @@ const CustomIosCalendarPopover: React.FC<CustomIosCalendarPopoverProps> = ({
   return (
     <AnimatePresence>
       <div
-        className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs select-none"
+        className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs select-none"
         onClick={onClose}
       >
         <motion.div
@@ -542,8 +543,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   setTimetableImage,
   storageMode,
   setStorageMode,
-  timetableEntries,
-  setTimetableEntries
+  timetables,
+  setTimetables
 }) => {
   const { accentColor } = useAccentColor();
   // Folder Navigation Level Path:
@@ -561,6 +562,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   // Timetable upload & storage mode state
   const timetableInputRef = useRef<HTMLInputElement | null>(null);
   const [isOcrLoading, setIsOcrLoading] = useState<boolean>(false);
+  const [pendingTimetableData, setPendingTimetableData] = useState<{ image: string, entries: TimetableEntry[] } | null>(null);
+  const [pendingSemesterType, setPendingSemesterType] = useState<any>('1학기');
+  const [pendingStartDate, setPendingStartDate] = useState<string>('');
+  const [pendingEndDate, setPendingEndDate] = useState<string>('');
+  const [expandedTimetableIds, setExpandedTimetableIds] = useState<string[]>([]);
+  const [editingTimetableId, setEditingTimetableId] = useState<string | null>(null);
+  const [editStartDate, setEditStartDate] = useState<string>('');
+  const [editEndDate, setEditEndDate] = useState<string>('');
 
   // Selection Mode state
   const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
@@ -847,6 +856,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const [pendingImportFiles, setPendingImportFiles] = useState<MediaFile[]>([]);
   const [isCustomDateOverride, setIsCustomDateOverride] = useState<boolean>(false);
   const [isCalendarPopoverOpen, setIsCalendarPopoverOpen] = useState<boolean>(false);
+  const [timetableDatePickerTarget, setTimetableDatePickerTarget] = useState<{
+    type: 'pendingStart' | 'pendingEnd' | 'editStart' | 'editEnd';
+    date: string;
+  } | null>(null);
   const [importTargetDate, setImportTargetDate] = useState<string>(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -860,25 +873,195 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       reader.onload = async (event) => {
         if (event.target?.result) {
           const base64Str = event.target.result as string;
-          setTimetableImage(base64Str);
           setIsOcrLoading(true);
           
           try {
             const parsedEntries = await analyzeTimetableImage(base64Str, geminiApiKey);
-            setTimetableEntries(parsedEntries);
-            setStorageMode('timetable');
-            setNavPath([]);
-            alert(`시간표가 성공적으로 인식되었습니다! (${parsedEntries.length}개 과목 저장됨)`);
+            
+            // Set defaults based on current month
+            const currentMonth = new Date().getMonth() + 1;
+            const currentYear = new Date().getFullYear();
+            let defaultSemester: any = '1학기';
+            let defaultStart = `${currentYear}-03-01`;
+            let defaultEnd = `${currentYear}-06-30`;
+            
+            if (currentMonth >= 9 && currentMonth <= 12) {
+              defaultSemester = '2학기';
+              defaultStart = `${currentYear}-09-01`;
+              defaultEnd = `${currentYear}-12-31`;
+            } else if (currentMonth >= 7 && currentMonth <= 8) {
+              defaultSemester = '여름학기';
+              defaultStart = '';
+              defaultEnd = '';
+            } else if (currentMonth >= 1 && currentMonth <= 2) {
+              defaultSemester = '겨울학기';
+              defaultStart = '';
+              defaultEnd = '';
+            }
+            
+            setPendingSemesterType(defaultSemester);
+            setPendingStartDate(defaultStart);
+            setPendingEndDate(defaultEnd);
+            setPendingTimetableData({ image: base64Str, entries: parsedEntries });
+            
+            showToast(`시간표가 성공적으로 인식되었습니다! 세부 정보를 입력해주세요.`);
           } catch (error: any) {
             console.error(error);
             alert(`시간표 인식에 실패했습니다: ${error.message || error}`);
           } finally {
             setIsOcrLoading(false);
+            if (timetableInputRef.current) timetableInputRef.current.value = '';
           }
         }
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  // Helper function to shift dates safely by days
+  const addDaysToDateString = (dateStr: string, days: number): string => {
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+      return dateStr;
+    }
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    d.setDate(d.getDate() + days);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  // Resolve overlaps with other timetables by adjusting their start/end dates
+  const resolveTimetableOverlap = (
+    allTimetables: SemesterTimetable[],
+    targetTimetable: SemesterTimetable
+  ): { resolved: SemesterTimetable[]; adjustedDescriptions: string[] } => {
+    const adjustedDescriptions: string[] = [];
+    const targetStart = targetTimetable.startDate;
+    const targetEnd = targetTimetable.endDate;
+
+    const resolved = allTimetables.map((t) => {
+      if (t.id === targetTimetable.id) {
+        return targetTimetable;
+      }
+
+      const tStart = t.startDate;
+      const tEnd = t.endDate;
+
+      // Check if [tStart, tEnd] overlaps with [targetStart, targetEnd]
+      const hasOverlap = tStart <= targetEnd && tEnd >= targetStart;
+      if (!hasOverlap) {
+        return t;
+      }
+
+      let newStart = tStart;
+      let newEnd = tEnd;
+
+      // Case 1: Other timetable started before targetStart, but ends inside or at the end of target range
+      // (e.g. Timetable 1: 03-01~06-30, New Timetable: 06-25~07-31 -> Timetable 1 ends on 06-24)
+      if (tStart < targetStart && tEnd >= targetStart && tEnd <= targetEnd) {
+        newEnd = addDaysToDateString(targetStart, -1);
+        if (newEnd < newStart) newEnd = newStart;
+      }
+      // Case 2: Other timetable starts inside target range, but ends after targetEnd
+      // (e.g. New Timetable: 06-25~08-10, Timetable 2: 08-01~12-31 -> Timetable 2 starts on 08-11)
+      else if (tStart >= targetStart && tStart <= targetEnd && tEnd > targetEnd) {
+        newStart = addDaysToDateString(targetEnd, 1);
+        if (newStart > newEnd) newStart = newEnd;
+      }
+      // Case 3: Other timetable completely envelops target range (tStart < targetStart && tEnd > targetEnd)
+      else if (tStart < targetStart && tEnd > targetEnd) {
+        newEnd = addDaysToDateString(targetStart, -1);
+        if (newEnd < newStart) newEnd = newStart;
+      }
+      // Case 4: Other timetable is completely inside target range (tStart >= targetStart && tEnd <= targetEnd)
+      else if (tStart >= targetStart && tEnd <= targetEnd) {
+        newEnd = addDaysToDateString(targetStart, -1);
+        if (newEnd < newStart) newEnd = newStart;
+      }
+
+      if (newStart !== tStart || newEnd !== tEnd) {
+        adjustedDescriptions.push(`${t.semester} (${newStart} ~ ${newEnd})`);
+        return {
+          ...t,
+          startDate: newStart,
+          endDate: newEnd
+        };
+      }
+
+      return t;
+    });
+
+    const isExisting = allTimetables.some((t) => t.id === targetTimetable.id);
+    if (!isExisting) {
+      resolved.push(targetTimetable);
+    }
+
+    return { resolved, adjustedDescriptions };
+  };
+
+  const handleSavePendingTimetable = () => {
+    if (!pendingTimetableData) return;
+    if (!pendingStartDate || !pendingEndDate) {
+      alert('시작일과 종료일을 입력해주세요.');
+      return;
+    }
+    if (pendingStartDate > pendingEndDate) {
+      alert('시작일은 종료일보다 이전이거나 같아야 합니다.');
+      return;
+    }
+    
+    const newTimetable: SemesterTimetable = {
+      id: `timetable_${Date.now()}`,
+      year: new Date(pendingStartDate).getFullYear() || new Date().getFullYear(),
+      semester: pendingSemesterType,
+      startDate: pendingStartDate,
+      endDate: pendingEndDate,
+      entries: pendingTimetableData.entries,
+      image: pendingTimetableData.image,
+      createdAt: new Date().toISOString()
+    };
+    
+    const { resolved, adjustedDescriptions } = resolveTimetableOverlap(timetables, newTimetable);
+    setTimetables(resolved);
+    setStorageMode('timetable');
+    setNavPath([]);
+    setPendingTimetableData(null);
+
+    let message = `시간표(${pendingSemesterType})가 등록되었습니다.`;
+    if (adjustedDescriptions.length > 0) {
+      message += ` (기간이 겹치는 기존 시간표 자동 조정: ${adjustedDescriptions.join(', ')})`;
+    }
+    showToast(message);
+  };
+
+  const handleSaveEditedTimetable = (tt: SemesterTimetable) => {
+    if (!editStartDate || !editEndDate) {
+      alert('시작일과 종료일을 입력해주세요.');
+      return;
+    }
+    if (editStartDate > editEndDate) {
+      alert('시작일은 종료일보다 이전이거나 같아야 합니다.');
+      return;
+    }
+
+    const updated: SemesterTimetable = {
+      ...tt,
+      startDate: editStartDate,
+      endDate: editEndDate,
+      year: new Date(editStartDate).getFullYear() || tt.year
+    };
+
+    const { resolved, adjustedDescriptions } = resolveTimetableOverlap(timetables, updated);
+    setTimetables(resolved);
+    setEditingTimetableId(null);
+
+    let message = `${tt.year}년 ${tt.semester} 적용 기간이 수정되었습니다.`;
+    if (adjustedDescriptions.length > 0) {
+      message += ` (기간이 겹치는 다른 시간표 자동 조정: ${adjustedDescriptions.join(', ')})`;
+    }
+    showToast(message);
   };
 
   // Search & Filter state
@@ -992,9 +1175,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       .filter((file) => file.type === 'photo' || file.type === 'audio')
       .map((file) => ({
         ...file,
-        hierarchy: getFolderHierarchyFromDate(file.timestamp, file.name, timetableEntries)
+        hierarchy: getFolderHierarchyFromDate(file.timestamp, file.name, timetables)
       }));
-  }, [mediaList, timetableEntries]);
+  }, [mediaList, timetables]);
 
   // Filtered organized files based on global selectedFileFilters bubble selection
   const filteredOrganizedFiles = useMemo(() => {
@@ -1128,11 +1311,16 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     filteredOrganizedFiles.forEach((f) => {
       if (f.hierarchy.year) set.add(f.hierarchy.year);
     });
-    if (storageMode === 'timetable' && set.size === 0) {
-      set.add('2026년');
+    if (storageMode === 'timetable') {
+      timetables.forEach((t) => {
+        if (t.year) set.add(`${t.year}년`);
+      });
+      if (set.size === 0) {
+        set.add(`${new Date().getFullYear()}년`);
+      }
     }
     return Array.from(set).sort().reverse();
-  }, [filteredOrganizedFiles, storageMode]);
+  }, [filteredOrganizedFiles, storageMode, timetables]);
 
   const dynamicLevel1 = useMemo(() => {
     if (!currentYear) return [];
@@ -1149,24 +1337,43 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     });
 
     if (storageMode === 'timetable') {
-      set.add('1학기 (3월~8월)');
-      set.add('2학기 (9월~2월)');
+      timetables.forEach(t => {
+        if (`${t.year}년` === currentYear) {
+          set.add(t.semester);
+        }
+      });
+      if (set.size === 0) {
+        set.add('1학기');
+        set.add('2학기');
+      }
     }
 
-    return Array.from(set).sort();
-  }, [filteredOrganizedFiles, currentYear, storageMode]);
+    const semesterOrder = ['1학기', '여름학기', '여름계절', '2학기', '겨울학기', '겨울계절'];
+    return Array.from(set).sort((a, b) => {
+      const idxA = semesterOrder.indexOf(a);
+      const idxB = semesterOrder.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [filteredOrganizedFiles, currentYear, storageMode, timetables]);
 
   const dynamicLevel2 = useMemo(() => {
     if (!currentYear || !currentLevel1) return [];
     const set = new Set<string>();
 
     if (storageMode === 'timetable') {
-      // 1. Add all subjects directly from the recognized timetable
-      timetableEntries.forEach((entry) => {
-        if (entry.subject && entry.subject.trim()) {
-          set.add(entry.subject.trim());
-        }
-      });
+      // 1. Add all subjects directly from the recognized timetable matching year & semester
+      timetables
+        .filter(t => `${t.year}년` === currentYear && t.semester === currentLevel1)
+        .forEach(t => {
+          t.entries.forEach((entry) => {
+            if (entry.subject && entry.subject.trim()) {
+              set.add(entry.subject.trim());
+            }
+          });
+        });
     }
 
     filteredOrganizedFiles.forEach((f) => {
@@ -1185,7 +1392,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
       return a.localeCompare(b);
     });
-  }, [filteredOrganizedFiles, currentYear, currentLevel1, storageMode, timetableEntries]);
+  }, [filteredOrganizedFiles, currentYear, currentLevel1, storageMode, timetables]);
 
   const dynamicLevel3 = useMemo(() => {
     if (!currentYear || !currentLevel1 || !currentLevel2) return [];
@@ -1231,7 +1438,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
   // Current level files list
   const dayFiles = useMemo(() => {
-    return filteredOrganizedFiles.filter((item) => {
+    const list = filteredOrganizedFiles.filter((item) => {
       if (storageMode === 'default') {
         if (currentYear && item.hierarchy.year !== currentYear) return false;
         if (currentLevel1 && item.hierarchy.halfYear !== currentLevel1) return false;
@@ -1673,22 +1880,37 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           accentColor={accentColor}
         />
 
+        {/* Custom iOS-Style Glassmorphism Calendar Popover Modal for Timetable Dates */}
+        <CustomIosCalendarPopover
+          isOpen={timetableDatePickerTarget !== null}
+          onClose={() => setTimetableDatePickerTarget(null)}
+          selectedDateStr={timetableDatePickerTarget?.date || ''}
+          onSelectDate={(newDate) => {
+            if (timetableDatePickerTarget?.type === 'pendingStart') setPendingStartDate(newDate);
+            if (timetableDatePickerTarget?.type === 'pendingEnd') setPendingEndDate(newDate);
+            if (timetableDatePickerTarget?.type === 'editStart') setEditStartDate(newDate);
+            if (timetableDatePickerTarget?.type === 'editEnd') setEditEndDate(newDate);
+            setTimetableDatePickerTarget(null);
+          }}
+          accentColor={accentColor}
+        />
+
         {/* Selection Mode Notice Banner (Camera Floating Style) */}
         {(isSelectionMode || isReorderMode) && (
-          <div className="px-5 pt-3 pb-0">
-            <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-md rounded-full px-4 py-2 flex items-center justify-between text-xs text-neutral-800">
-              <div className="flex items-center gap-2">
+          <div className="px-5 pt-3 pb-0.5">
+            <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-md rounded-full px-5 py-3 flex items-center justify-between text-xs text-neutral-800 min-h-[48px]">
+              <div className="flex items-center gap-2.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-black animate-pulse flex-shrink-0" />
-                <span className="font-bold text-xs">{selectedExplorerFiles.length}개 항목 선택됨</span>
+                <span className="font-bold text-xs sm:text-[13px]">{selectedExplorerFiles.length}개 항목 선택됨</span>
               </div>
               <button
                 onClick={() => {
                   setIsSelectionMode(false);
-      setIsReorderMode(false);
+                  setIsReorderMode(false);
                   setSelectedItemIds([]);
                   showToast('선택 모드가 종료되었습니다.');
                 }}
-                className="text-xs font-bold text-neutral-500 hover:text-neutral-900 px-2.5 py-0.5 rounded-lg transition-colors bg-neutral-100 hover:bg-neutral-200"
+                className="text-xs font-bold text-neutral-600 hover:text-neutral-900 px-3.5 py-1.5 rounded-full transition-colors bg-neutral-100 hover:bg-neutral-200 active:scale-95 shadow-2xs"
               >
                 취소
               </button>
@@ -2899,98 +3121,316 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         </button>
                       </div>
 
-                      {timetableImage ? (
-                        <div className="space-y-3 pt-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-neutral-800 flex items-center gap-1.5">
-                              <Check className="w-4 h-4 text-emerald-600 stroke-[2.5]" />
-                              등록된 시간표 사진
-                            </span>
-                            <button
-                              onClick={() => {
-                                setTimetableImage(null);
-                                setTimetableEntries([]);
-                                showToast('시간표 사진이 삭제되었습니다.');
-                              }}
-                              className="text-[11px] text-rose-500 font-semibold hover:underline flex items-center gap-1"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              삭제
-                            </button>
+                      {/* Pending Timetable Metadata Form */}
+                      {pendingTimetableData ? (
+                        <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-4">
+                          <h4 className="text-sm font-bold text-neutral-900">시간표 세부 정보 입력</h4>
+                          <div className="relative rounded-xl overflow-hidden border border-neutral-200/80 bg-neutral-900 aspect-4/3 max-h-40">
+                            <img src={pendingTimetableData.image} alt="인식된 시간표" className="w-full h-full object-contain" />
                           </div>
-                          <div className="relative rounded-xl overflow-hidden border border-neutral-200/80 bg-neutral-900 aspect-4/3 max-h-56">
-                            <img
-                              src={timetableImage}
-                              alt="등록된 시간표"
-                              className="w-full h-full object-contain"
-                            />
-                          </div>
-
-                          {/* Recognized Timetable Subjects List */}
-                          {timetableEntries.length > 0 && (
-                            <div className="bg-neutral-50 rounded-xl p-3 border border-neutral-200/80 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-bold text-neutral-700">
-                                  📋 인식된 과목 목록 ({timetableEntries.length}개)
-                                </span>
-                                <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                                  폴더 자동 연결됨
-                                </span>
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-[11px] font-bold text-neutral-600 mb-1 block">학기 선택</label>
+                              <select 
+                                value={pendingSemesterType} 
+                                onChange={(e) => setPendingSemesterType(e.target.value)}
+                                className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-2 text-xs text-neutral-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                              >
+                                <option value="1학기">1학기</option>
+                                <option value="여름학기">여름학기</option>
+                                <option value="2학기">2학기</option>
+                                <option value="겨울학기">겨울학기</option>
+                              </select>
+                            </div>
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="text-[11px] font-bold text-neutral-600 mb-1 block">시작일</label>
+                                <button
+                                  type="button"
+                                  onClick={() => setTimetableDatePickerTarget({
+                                    type: 'pendingStart',
+                                    date: pendingStartDate || `${new Date().getFullYear()}-03-01`
+                                  })}
+                                  className="w-full bg-neutral-50 hover:bg-neutral-100/90 border border-neutral-200 rounded-xl px-3 py-2 text-xs text-neutral-800 flex items-center justify-between font-semibold transition-all active:scale-[0.98] shadow-2xs cursor-pointer"
+                                >
+                                  <span className="flex items-center gap-1.5 truncate">
+                                    <CalendarDays className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
+                                    <span className={pendingStartDate ? 'text-neutral-900 font-bold' : 'text-neutral-400'}>
+                                      {pendingStartDate || '시작일 선택'}
+                                    </span>
+                                  </span>
+                                  <ChevronDown className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
+                                </button>
                               </div>
-                              <div className="max-h-40 overflow-y-auto space-y-1 divide-y divide-neutral-100">
-                                {timetableEntries.map((entry, idx) => {
-                                  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-                                  return (
-                                    <div key={idx} className="flex items-center justify-between text-xs pt-1.5 first:pt-0">
-                                      <div className="flex items-center gap-1.5 font-bold text-neutral-800">
-                                        <span className="w-5 h-5 rounded-md bg-neutral-200 text-neutral-700 flex items-center justify-center text-[10px] font-black">
-                                          {dayNames[entry.dayOfWeek] || '월'}
-                                        </span>
-                                        <span>{entry.subject}</span>
-                                      </div>
-                                      <span className="text-[11px] text-neutral-500 font-mono">
-                                        {entry.startTime} ~ {entry.endTime}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
+                              <div className="flex-1">
+                                <label className="text-[11px] font-bold text-neutral-600 mb-1 block">종료일</label>
+                                <button
+                                  type="button"
+                                  onClick={() => setTimetableDatePickerTarget({
+                                    type: 'pendingEnd',
+                                    date: pendingEndDate || `${new Date().getFullYear()}-06-30`
+                                  })}
+                                  className="w-full bg-neutral-50 hover:bg-neutral-100/90 border border-neutral-200 rounded-xl px-3 py-2 text-xs text-neutral-800 flex items-center justify-between font-semibold transition-all active:scale-[0.98] shadow-2xs cursor-pointer"
+                                >
+                                  <span className="flex items-center gap-1.5 truncate">
+                                    <CalendarDays className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
+                                    <span className={pendingEndDate ? 'text-neutral-900 font-bold' : 'text-neutral-400'}>
+                                      {pendingEndDate || '종료일 선택'}
+                                    </span>
+                                  </span>
+                                  <ChevronDown className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
+                                </button>
                               </div>
                             </div>
+                            <div className="flex gap-2 pt-2">
+                              <button 
+                                onClick={() => {
+                                  setPendingTimetableData(null);
+                                  if (timetableInputRef.current) timetableInputRef.current.value = '';
+                                }}
+                                className="flex-1 py-2.5 rounded-xl bg-neutral-100 text-neutral-600 text-xs font-bold hover:bg-neutral-200"
+                              >
+                                취소
+                              </button>
+                              <button 
+                                onClick={handleSavePendingTimetable}
+                                className="flex-1 py-2.5 rounded-xl text-white text-xs font-bold"
+                                style={{ backgroundColor: accentColor }}
+                              >
+                                {pendingTimetableData.entries.length}개 과목 저장
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-4 pt-2">
+                          {/* Registered Timetables List */}
+                          {timetables.length > 0 && (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between px-1">
+                                <span className="text-xs font-bold text-neutral-800 flex items-center gap-1.5">
+                                  <Check className="w-4 h-4 text-emerald-600 stroke-[2.5]" />
+                                  등록된 시간표 목록 ({timetables.length}개)
+                                </span>
+                              </div>
+                              {timetables.map((tt) => {
+                                const isExpanded = expandedTimetableIds.includes(tt.id);
+                                const isEditing = editingTimetableId === tt.id;
+                                const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+
+                                return (
+                                  <div key={tt.id} className="bg-neutral-50 rounded-xl p-3.5 border border-neutral-200/80 space-y-2 relative overflow-hidden group hover:border-neutral-300 transition-colors">
+                                    {isEditing ? (
+                                      <div className="bg-white p-3 rounded-xl border border-neutral-200/90 shadow-2xs space-y-2.5 animate-in fade-in duration-150">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-xs font-bold text-neutral-900 flex items-center gap-1.5">
+                                            <Pencil className="w-3.5 h-3.5 text-neutral-500" />
+                                            {tt.year}년 {tt.semester} 적용 기간 변경
+                                          </span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <div className="flex-1">
+                                            <label className="text-[10px] font-bold text-neutral-500 mb-1 block">시작일</label>
+                                            <button
+                                              type="button"
+                                              onClick={() => setTimetableDatePickerTarget({
+                                                type: 'editStart',
+                                                date: editStartDate || tt.startDate
+                                              })}
+                                              className="w-full bg-neutral-50 hover:bg-neutral-100/90 border border-neutral-200 rounded-xl px-2.5 py-1.5 text-xs text-neutral-800 flex items-center justify-between font-semibold transition-all active:scale-[0.98] shadow-2xs cursor-pointer"
+                                            >
+                                              <span className="flex items-center gap-1.5 truncate">
+                                                <CalendarDays className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
+                                                <span className={editStartDate ? 'text-neutral-900 font-bold' : 'text-neutral-400'}>
+                                                  {editStartDate || '시작일 선택'}
+                                                </span>
+                                              </span>
+                                              <ChevronDown className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
+                                            </button>
+                                          </div>
+                                          <div className="flex-1">
+                                            <label className="text-[10px] font-bold text-neutral-500 mb-1 block">종료일</label>
+                                            <button
+                                              type="button"
+                                              onClick={() => setTimetableDatePickerTarget({
+                                                type: 'editEnd',
+                                                date: editEndDate || tt.endDate
+                                              })}
+                                              className="w-full bg-neutral-50 hover:bg-neutral-100/90 border border-neutral-200 rounded-xl px-2.5 py-1.5 text-xs text-neutral-800 flex items-center justify-between font-semibold transition-all active:scale-[0.98] shadow-2xs cursor-pointer"
+                                            >
+                                              <span className="flex items-center gap-1.5 truncate">
+                                                <CalendarDays className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
+                                                <span className={editEndDate ? 'text-neutral-900 font-bold' : 'text-neutral-400'}>
+                                                  {editEndDate || '종료일 선택'}
+                                                </span>
+                                              </span>
+                                              <ChevronDown className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                        <p className="text-[10px] text-neutral-400">
+                                          * 변경된 기간이 다른 시간표와 겹치면, 다른 시간표의 적용 기간이 자동으로 조정됩니다.
+                                        </p>
+                                        <div className="flex gap-2 pt-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditingTimetableId(null)}
+                                            className="flex-1 py-1.5 rounded-lg bg-neutral-100 text-neutral-600 text-xs font-bold hover:bg-neutral-200 transition-colors"
+                                          >
+                                            취소
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSaveEditedTimetable(tt)}
+                                            className="flex-1 py-1.5 rounded-lg text-white text-xs font-bold transition-all shadow-2xs"
+                                            style={{ backgroundColor: accentColor }}
+                                          >
+                                            저장
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex justify-between items-start">
+                                        <div className="space-y-1">
+                                          <h5 className="text-[13px] font-bold text-neutral-900 flex items-center gap-2">
+                                            {tt.year}년 {tt.semester}
+                                            <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">
+                                              자동 연결 됨
+                                            </span>
+                                          </h5>
+                                          <p className="text-[11px] text-neutral-500 font-mono tracking-tight">{tt.startDate} ~ {tt.endDate}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingTimetableId(tt.id);
+                                              setEditStartDate(tt.startDate);
+                                              setEditEndDate(tt.endDate);
+                                            }}
+                                            className="text-neutral-500 hover:text-neutral-800 hover:bg-neutral-200/70 px-2 py-1 rounded-lg transition-colors flex items-center gap-1 text-[11px] font-bold border border-neutral-200/80 bg-white"
+                                            title="적용 기간 수정"
+                                          >
+                                            <Pencil className="w-3 h-3 text-neutral-500" />
+                                            <span>기간 수정</span>
+                                          </button>
+                                          <button 
+                                            onClick={() => {
+                                              if (window.confirm(`${tt.year}년 ${tt.semester} 시간표를 삭제하시겠습니까?`)) {
+                                                setTimetables(prev => prev.filter(t => t.id !== tt.id));
+                                                setExpandedTimetableIds(prev => prev.filter(id => id !== tt.id));
+                                                showToast(`${tt.year}년 ${tt.semester} 시간표가 삭제되었습니다.`);
+                                                if (timetables.length === 1) setStorageMode('default');
+                                              }
+                                            }}
+                                            className="text-neutral-400 hover:text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg transition-colors"
+                                            title="시간표 삭제"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Action row with Subject Count & Toggle Button */}
+                                    <div className="flex items-center justify-between pt-2 border-t border-neutral-200/50">
+                                      <span className="text-[11px] font-semibold text-neutral-600">
+                                        인식된 과목: <span className="text-neutral-900 font-bold">{tt.entries.length}개</span>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setExpandedTimetableIds(prev =>
+                                            prev.includes(tt.id)
+                                              ? prev.filter(id => id !== tt.id)
+                                              : [...prev, tt.id]
+                                          );
+                                        }}
+                                        className="inline-flex items-center gap-1.5 text-[11px] font-bold text-neutral-700 hover:text-neutral-950 bg-white hover:bg-neutral-100 active:bg-neutral-200 px-2.5 py-1 rounded-lg border border-neutral-200/90 shadow-2xs transition-all active:scale-95"
+                                      >
+                                        <span>{isExpanded ? '과목 접기' : '등록된 과목 보기'}</span>
+                                        <ChevronDown className={`w-3.5 h-3.5 text-neutral-500 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                      </button>
+                                    </div>
+
+                                    {/* Expanded Subjects List */}
+                                    {isExpanded && (
+                                      <div className="mt-2 pt-2.5 border-t border-neutral-200/60 space-y-2 animate-in fade-in duration-200">
+                                        {tt.entries.length > 0 ? (
+                                          <div className="space-y-1.5">
+                                            <div className="flex items-center justify-between px-0.5">
+                                              <span className="text-[11px] font-bold text-neutral-700 flex items-center gap-1">
+                                                📋 과목 및 강의 시간
+                                              </span>
+                                              <span className="text-[10px] text-neutral-400 font-medium">
+                                                총 {tt.entries.length}개 강좌
+                                              </span>
+                                            </div>
+                                            <div className="max-h-48 overflow-y-auto space-y-1 bg-white rounded-xl p-2.5 border border-neutral-200/80 divide-y divide-neutral-100">
+                                              {tt.entries.map((entry, idx) => (
+                                                <div key={idx} className="flex items-center justify-between text-xs py-1.5 first:pt-0.5 last:pb-0.5">
+                                                  <div className="flex items-center gap-2 font-semibold text-neutral-800 min-w-0 pr-2">
+                                                    <span className="w-5 h-5 rounded-md bg-neutral-100 text-neutral-700 flex items-center justify-center text-[10px] font-bold shrink-0">
+                                                      {dayNames[entry.dayOfWeek] || '월'}
+                                                    </span>
+                                                    <span className="truncate">{entry.subject}</span>
+                                                  </div>
+                                                  <span className="text-[11px] text-neutral-500 font-mono shrink-0">
+                                                    {entry.startTime} ~ {entry.endTime}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div className="bg-white rounded-xl p-3 border border-neutral-200/80 text-center text-xs text-neutral-400 font-medium">
+                                            등록된 과목 정보가 없습니다.
+                                          </div>
+                                        )}
+
+                                        {/* Optional Timetable Image Preview */}
+                                        {tt.image && (
+                                          <div className="pt-1">
+                                            <details className="group/img text-[11px] text-neutral-600">
+                                              <summary className="cursor-pointer font-bold text-neutral-700 hover:text-black select-none list-none flex items-center justify-between p-2 rounded-lg bg-white border border-neutral-200/70 hover:bg-neutral-100/60 transition-colors">
+                                                <span>🖼️ 원본 시간표 이미지 확인</span>
+                                                <span className="text-[10px] text-neutral-400 group-open/img:rotate-180 transition-transform">▼</span>
+                                              </summary>
+                                              <div className="mt-2 rounded-xl overflow-hidden border border-neutral-200 bg-neutral-950 aspect-4/3 max-h-52">
+                                                <img
+                                                  src={tt.image}
+                                                  alt={`${tt.year}년 ${tt.semester} 원본 시간표`}
+                                                  className="w-full h-full object-contain"
+                                                />
+                                              </div>
+                                            </details>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           )}
+
                           <button
                             onClick={() => timetableInputRef.current?.click()}
                             disabled={isOcrLoading}
-                            className={`w-full text-xs font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 border ${
+                            className={`w-full text-xs font-bold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs ${
                               isOcrLoading
-                                ? 'bg-neutral-200 text-neutral-400 border-neutral-200 cursor-not-allowed'
-                                : 'bg-neutral-100 text-neutral-800 hover:bg-neutral-200 active:scale-98 border-neutral-200/80'
+                                ? 'bg-neutral-700 text-neutral-400 cursor-not-allowed'
+                                : 'bg-neutral-900 text-white hover:bg-black active:scale-98'
                             }`}
                           >
                             {isOcrLoading ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <Loader2 className="w-4 h-4 animate-spin text-neutral-400" />
                             ) : (
-                              <Upload className="w-4 h-4 text-neutral-600" />
+                              <Upload className="w-4 h-4" style={{ color: accentColor }} />
                             )}
-                            <span>{isOcrLoading ? 'AI 분석 중...' : '시간표 사진 변경하기'}</span>
+                            <span>{isOcrLoading ? '시간표 분석 중...' : '새로운 시간표 추가하기'}</span>
                           </button>
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => timetableInputRef.current?.click()}
-                          disabled={isOcrLoading}
-                          className={`w-full text-xs font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs ${
-                            isOcrLoading
-                              ? 'bg-neutral-700 text-neutral-400 cursor-not-allowed'
-                              : 'bg-neutral-900 text-white hover:bg-black active:scale-98'
-                          }`}
-                        >
-                          {isOcrLoading ? (
-                            <Loader2 className="w-4 h-4 animate-spin text-neutral-400" />
-                          ) : (
-                            <Upload className="w-4 h-4" style={{ color: accentColor }} />
-                          )}
-                          <span>{isOcrLoading ? '시간표 분석 중...' : '시간표 가져오기 / 사진 업로드'}</span>
-                        </button>
                       )}
                     </div>
                     {/* OCR Loading Overlay */}
@@ -3482,10 +3922,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       showToast(`${count}개 항목 다운로드 시작`);
                     }
                   }}
-                  className="w-14 h-14 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-[#333333] hover:text-black active:scale-90 transition-all flex items-center justify-center shadow-md"
+                  className="w-14 h-14 rounded-full bg-white border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-neutral-900 hover:text-black hover:bg-neutral-50 active:scale-90 transition-all flex items-center justify-center shadow-md"
                   title="다운로드"
                 >
-                  <Download className="w-6 h-6 stroke-[2]" />
+                  <Download className="w-6 h-6 stroke-[2.2]" />
                 </button>
 
                 {/* 2. AI 버튼 (AI 센터가 아닐 때만 노출) */}

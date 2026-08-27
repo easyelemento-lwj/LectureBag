@@ -113,8 +113,8 @@ export const MainView: React.FC = () => {
         setTimetableImage={state.setTimetableImage}
         storageMode={state.storageMode}
         setStorageMode={state.setStorageMode}
-        timetableEntries={state.timetableEntries}
-        setTimetableEntries={state.setTimetableEntries}
+        timetables={state.timetables}
+        setTimetables={state.setTimetables}
       />
     </div>
   );

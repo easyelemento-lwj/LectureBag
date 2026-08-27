@@ -62,6 +62,38 @@ export function useAppState() {
     return [];
   });
 
+  const [timetables, setTimetables] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('lecture_snap_semester_timetables');
+      if (saved) {
+        const parsed: any[] = JSON.parse(saved);
+        // Filter out empty or stale dummy timetables with 0 entries
+        return parsed
+          .filter(t => t && Array.isArray(t.entries) && t.entries.length > 0)
+          .map(t => {
+            if (t.semester === '여름계절') return { ...t, semester: '여름학기' };
+            if (t.semester === '겨울계절') return { ...t, semester: '겨울학기' };
+            return t;
+          });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    // ── Obsolete LocalStorage Keys Clean-up ────────────────────────────────
+    try {
+      localStorage.removeItem('lecture_snap_timetable_entries');
+      localStorage.removeItem('lecture_snap_timetable_image');
+      localStorage.removeItem('doc_sample_1');
+      localStorage.removeItem('ai_doc_sample_1');
+    } catch (e) {
+      console.error('Failed to clean obsolete localStorage keys:', e);
+    }
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('lecture_snap_gemini_api_key', geminiApiKey);
   }, [geminiApiKey]);
@@ -79,8 +111,8 @@ export function useAppState() {
   }, [storageMode]);
 
   useEffect(() => {
-    localStorage.setItem('lecture_snap_timetable_entries', JSON.stringify(timetableEntries));
-  }, [timetableEntries]);
+    localStorage.setItem('lecture_snap_semester_timetables', JSON.stringify(timetables));
+  }, [timetables]);
 
   // ── Photos ─────────────────────────────────────────────────────────────
   const [photos, setPhotos] = useState<CapturedPhoto[]>(() => {
@@ -474,6 +506,7 @@ export function useAppState() {
     timetableImage, setTimetableImage,
     storageMode, setStorageMode,
     timetableEntries, setTimetableEntries,
+    timetables, setTimetables,
     currentDocument, setCurrentDocument,
     isFolderExplorerOpen, setIsFolderExplorerOpen,
     handleFolderButtonClick,

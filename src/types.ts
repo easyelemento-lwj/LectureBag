@@ -39,3 +39,15 @@ export interface TimetableEntry {
   endTime: string;   // "11:50"
 }
 
+export type SemesterType = '1학기' | '여름학기' | '2학기' | '겨울학기' | '여름계절' | '겨울계절';
+
+export interface SemesterTimetable {
+  id: string;
+  year: number;
+  semester: SemesterType;
+  startDate: string; // "YYYY-MM-DD"
+  endDate: string;   // "YYYY-MM-DD"
+  entries: TimetableEntry[];
+  image?: string; // Base64 or object URL of the original timetable image
+  createdAt: string;
+}

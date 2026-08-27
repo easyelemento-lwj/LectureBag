@@ -1,40 +1,54 @@
-import { MediaFile, CapturedPhoto, RecordedAudio, TimetableEntry } from '../types';
+import { MediaFile, CapturedPhoto, RecordedAudio, TimetableEntry, SemesterTimetable } from '../types';
 
 export interface FolderNode {
   year: string;         // e.g. "2026년"
   halfYear: string;     // e.g. "상반기" or "하반기"
-  semester: string;     // e.g. "1학기 (3월~8월)" or "2학기 (9월~2월)"
+  semester: string;     // e.g. "1학기", "여름계절", "2학기", "겨울계절"
   subject: string;      // e.g. "컴퓨터구조", "자료구조", "알고리즘", "운영체제"
   month: string;        // e.g. "8월"
   day: string;          // e.g. "2일 (일)"
 }
 
-export function getFolderHierarchyFromDate(dateInput: Date | string, fileName?: string, timetableEntries?: TimetableEntry[]): FolderNode {
+export function getFolderHierarchyFromDate(dateInput: Date | string, fileName?: string, timetables?: SemesterTimetable[]): FolderNode {
   const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
   const validDate = isNaN(date.getTime()) ? new Date() : date;
 
-  const year = `${validDate.getFullYear()}년`;
   const monthNum = validDate.getMonth() + 1;
   const halfYear = monthNum <= 6 ? '상반기' : '하반기';
   
-  // 1학기: 3월 ~ 8월, 2학기: 9월 ~ 2월
-  const semester = (monthNum >= 3 && monthNum <= 8) ? '1학기 (3월~8월)' : '2학기 (9월~2월)';
-
   const month = `${monthNum}월`;
-
   const daysOfWeek = ['일', '월', '화', '수', '목', '금', '토'];
   const dayOfWeekIndex = validDate.getDay();
   const dayName = daysOfWeek[dayOfWeekIndex];
   const day = `${validDate.getDate()}일 (${dayName})`;
 
-  let subject = '기타 과목';
+  // 1. Check if the date falls within any active SemesterTimetable
+  let matchedTimetable: SemesterTimetable | undefined;
+  if (timetables && timetables.length > 0) {
+    matchedTimetable = timetables.find(t => {
+      const start = new Date(t.startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(t.endDate);
+      end.setHours(23, 59, 59, 999);
+      return validDate >= start && validDate <= end;
+    });
+  }
 
-  if (timetableEntries && timetableEntries.length > 0) {
+  // 2. Determine Year and Semester
+  let year = `${validDate.getFullYear()}년`;
+  let semester = '1학기';
+  let subject = '기타 파일';
+
+  if (matchedTimetable) {
+    year = `${matchedTimetable.year}년`;
+    semester = matchedTimetable.semester;
+
+    // 3. Match Subject by Time
     const currentHour = validDate.getHours();
     const currentMin = validDate.getMinutes();
     const currentTotalMins = currentHour * 60 + currentMin;
 
-    const matchedEntry = timetableEntries.find((entry) => {
+    const matchedEntry = matchedTimetable.entries.find((entry) => {
       if (entry.dayOfWeek !== dayOfWeekIndex) return false;
       
       const [startH, startM] = entry.startTime.split(':').map(Number);
@@ -49,30 +63,20 @@ export function getFolderHierarchyFromDate(dateInput: Date | string, fileName?: 
     if (matchedEntry) {
       subject = matchedEntry.subject;
     } else {
-      subject = '기타 과목';
+      subject = '기타 파일';
     }
   } else {
-    // 기존 하드코딩된 과목 분류 로직 (Fallback)
-    if (fileName) {
-      const fn = fileName.toLowerCase();
-      if (fn.includes('컴퓨터') || fn.includes('메모리')) subject = '컴퓨터구조';
-      else if (fn.includes('자료구조') || fn.includes('트리')) subject = '자료구조';
-      else if (fn.includes('알고리즘')) subject = '알고리즘';
-      else if (fn.includes('운영체제') || fn.includes('프로세스')) subject = '운영체제';
-      else {
-        const hours = validDate.getHours();
-        if (hours >= 9 && hours < 12) subject = '컴퓨터구조';
-        else if (hours >= 12 && hours < 15) subject = '자료구조';
-        else if (hours >= 15 && hours < 18) subject = '알고리즘';
-        else subject = '운영체제';
-      }
+    // 4대 시즌 자동 분기 (3~6월: 1학기, 7~8월: 여름학기, 9~12월: 2학기, 1~2월: 겨울학기)
+    if (monthNum >= 1 && monthNum <= 2) {
+      semester = '겨울학기';
+    } else if (monthNum >= 3 && monthNum <= 6) {
+      semester = '1학기';
+    } else if (monthNum >= 7 && monthNum <= 8) {
+      semester = '여름학기';
     } else {
-        const hours = validDate.getHours();
-        if (hours >= 9 && hours < 12) subject = '컴퓨터구조';
-        else if (hours >= 12 && hours < 15) subject = '자료구조';
-        else if (hours >= 15 && hours < 18) subject = '알고리즘';
-        else subject = '운영체제';
+      semester = '2학기';
     }
+    subject = '기타 파일';
   }
 
   return { year, halfYear, semester, subject, month, day };

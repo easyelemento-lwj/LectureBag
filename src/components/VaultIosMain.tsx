@@ -851,6 +851,14 @@ export const VaultIosMain: React.FC = () => {
         showToast={showToast}
         photos={photos}
         recordings={recordings}
+        geminiApiKey=""
+        setGeminiApiKey={() => {}}
+        timetableImage={null}
+        setTimetableImage={() => {}}
+        storageMode="default"
+        setStorageMode={() => {}}
+        timetables={[]}
+        setTimetables={() => {}}
       />
     </div>
   );

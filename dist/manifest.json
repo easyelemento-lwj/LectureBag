@@ -1,6 +1,6 @@
 {
-  "name": "LectureSnap",
-  "short_name": "LectureSnap",
+  "name": "LectureBag",
+  "short_name": "LectureBag",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
