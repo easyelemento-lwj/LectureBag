@@ -10,6 +10,8 @@ import { CapturedPhoto, FlashMode, RecordedAudio, TimetableEntry, AspectRatio } 
 import { playShutterSound } from '../utils/audio';
 import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
 import { useDeviceType } from '../hooks/useDeviceType';
+import { get, set } from 'idb-keyval';
+import { compressImage } from '../utils/imageCompression';
 
 declare global {
   interface Window {
@@ -33,6 +35,7 @@ function formatFileName(date: Date | string): string {
 }
 
 export function useAppState() {
+  const [isDataLoaded, setIsDataLoaded] = React.useState(false);
   const deviceType = useDeviceType();
 
   // ── Document / Folder ──────────────────────────────────────────────────
@@ -62,25 +65,7 @@ export function useAppState() {
     return [];
   });
 
-  const [timetables, setTimetables] = useState<any[]>(() => {
-    try {
-      const saved = localStorage.getItem('lecture_snap_semester_timetables');
-      if (saved) {
-        const parsed: any[] = JSON.parse(saved);
-        // Filter out empty or stale dummy timetables with 0 entries
-        return parsed
-          .filter(t => t && Array.isArray(t.entries) && t.entries.length > 0)
-          .map(t => {
-            if (t.semester === '여름계절') return { ...t, semester: '여름학기' };
-            if (t.semester === '겨울계절') return { ...t, semester: '겨울학기' };
-            return t;
-          });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  });
+  const [timetables, setTimetables] = useState<any[]>([]);
 
   useEffect(() => {
     // ── Obsolete LocalStorage Keys Clean-up ────────────────────────────────
@@ -110,86 +95,15 @@ export function useAppState() {
     localStorage.setItem('lecture_snap_storage_mode', storageMode);
   }, [storageMode]);
 
-  useEffect(() => {
-    localStorage.setItem('lecture_snap_semester_timetables', JSON.stringify(timetables));
-  }, [timetables]);
+
 
   // ── Photos ─────────────────────────────────────────────────────────────
-  const [photos, setPhotos] = useState<CapturedPhoto[]>(() => {
-    try {
-      const saved = localStorage.getItem('lecture_snap_photos');
-      if (saved) {
-        const parsed: CapturedPhoto[] = JSON.parse(saved);
-        // Filter out fake/dummy sample photos
-        const realPhotos = parsed.filter(
-          (p) => p.id !== 'sample_1' && (!p.dataUrl || !p.dataUrl.includes('PPT 슬라이드 #1'))
-        );
-        // Migrate & Deduplicate
-        const seenIds = new Set<string>();
-        return realPhotos.map((p) => {
-          const ts = p.timestamp ?? new Date();
-          const name = formatFileName(ts);
-          let uniqueId = p.id;
-          
-          // If collision or using the old non-unique YYYYMMDD_HHmm format
-          if (seenIds.has(uniqueId) || /^photo_\d{8}_\d{4}$/.test(uniqueId) || /^photo_\d{8}_\d{6}$/.test(uniqueId)) {
-            uniqueId = `photo_${name}_${Math.floor(Math.random() * 100000)}`;
-          }
-          seenIds.add(uniqueId);
-          
-          return {
-            ...p,
-            id: uniqueId,
-            folderName: p.folderName ?? name,
-          };
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  });
+  const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
 
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
 
   // ── Recordings ─────────────────────────────────────────────────────────
-  const [recordings, setRecordings] = useState<RecordedAudio[]>(() => {
-    try {
-      const saved = localStorage.getItem('lecture_snap_recordings');
-      if (saved) {
-        const parsed: RecordedAudio[] = JSON.parse(saved);
-        // Filter out fake/dummy sample recordings
-        const realRecordings = parsed.filter(
-          (r) =>
-            r.id !== 'rec_sample_1' &&
-            !(r.duration === '45:12' && r.size === '18.4 MB') &&
-            (!r.name || !r.name.includes('컴퓨터구조 12주차 강의 녹음'))
-        );
-        // Migrate & Deduplicate
-        const seenIds = new Set<string>();
-        return realRecordings.map((r) => {
-          const ts = r.timestamp ?? new Date();
-          const name = formatFileName(ts);
-          const needsMigration = !r.name.match(/^\d{8}_\d{4}/);
-          let uniqueId = r.id;
-          
-          if (seenIds.has(uniqueId) || /^rec_\d{8}_\d{4}$/.test(uniqueId) || /^rec_\d{8}_\d{6}$/.test(uniqueId)) {
-            uniqueId = `rec_${name}_${Math.floor(Math.random() * 100000)}`;
-          }
-          seenIds.add(uniqueId);
-          
-          return {
-            ...r,
-            id: uniqueId,
-            name: needsMigration ? `${name}.m4a` : r.name,
-          };
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  });
+  const [recordings, setRecordings] = useState<RecordedAudio[]>([]);
 
   // ── Camera Stream ──────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -218,6 +132,57 @@ export function useAppState() {
 
   // ── Selection Queue ────────────────────────────────────────────────────
   const [selectedQueueItems] = useState<string[]>(['yt_1', 'insta_1']);
+
+  // ── IndexedDB Async Loading ────────────────────────────────────────────
+  useEffect(() => {
+    async function requestPersistentStorage() {
+      if (navigator.storage && navigator.storage.persist) {
+        try {
+          await navigator.storage.persist();
+        } catch (e) {
+          console.error('Failed to request persistent storage', e);
+        }
+      }
+    }
+
+    async function loadData() {
+      try {
+        await requestPersistentStorage();
+        
+        const [savedPhotos, savedRecs, savedTimetables] = await Promise.all([
+          get('lecture_snap_photos'),
+          get('lecture_snap_recordings'),
+          get('lecture_snap_semester_timetables'),
+        ]);
+
+        if (savedPhotos) setPhotos(savedPhotos);
+        if (savedRecs) setRecordings(savedRecs);
+        if (savedTimetables) setTimetables(savedTimetables);
+      } catch (e) {
+        console.error('Failed to load data from IDB:', e);
+      } finally {
+        setIsDataLoaded(true);
+      }
+    }
+    loadData();
+  }, []);
+
+  // ── IndexedDB Auto Save ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    set('lecture_snap_photos', photos).catch(console.error);
+  }, [photos, isDataLoaded]);
+
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    set('lecture_snap_recordings', recordings).catch(console.error);
+  }, [recordings, isDataLoaded]);
+
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    set('lecture_snap_semester_timetables', timetables).catch(console.error);
+  }, [timetables, isDataLoaded]);
+
 
   const showToast = useCallback((_msg: string) => {
     // Popup notifications disabled per user request
@@ -359,14 +324,14 @@ export function useAppState() {
       audioChunksRef.current = [];
 
       // 2. 브라우저 지원 코덱 설정
-      let options: MediaRecorderOptions = {};
+      let options: MediaRecorderOptions = { audioBitsPerSecond: 32000 };
       if (typeof MediaRecorder !== 'undefined') {
         if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-          options = { mimeType: 'audio/webm;codecs=opus' };
+          options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 32000 };
         } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          options = { mimeType: 'audio/mp4' };
+          options = { mimeType: 'audio/mp4', audioBitsPerSecond: 32000 };
         } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-          options = { mimeType: 'audio/webm' };
+          options = { mimeType: 'audio/webm', audioBitsPerSecond: 32000 };
         }
       }
 
@@ -545,14 +510,14 @@ export function useAppState() {
         }
 
         ctx.drawImage(video, sX, sY, sW, sH, 0, 0, canvas.width, canvas.height);
-        dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        dataUrl = compressImage(canvas);
       }
     } else {
       // Camera offline fallback: Fill snapshot with solid black
       if (ctx) {
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
-        dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        dataUrl = compressImage(canvas);
       }
     }
 
