@@ -4,26 +4,44 @@ import json
 import base64
 import traceback
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from dotenv import load_dotenv
 
 # .env 파일이 있으면 자동으로 로드 (로컬 개발 환경 지원)
 load_dotenv()
 
+# ── Rate Limiter 설정 ─────────────────────────────────────────────────
+# IP 기반으로 과도한 호출을 막아 Gemini API 과금 폭탄을 방어합니다.
+limiter = Limiter(key_func=get_remote_address)
+
 # FastAPI 앱 초기화
 app = FastAPI(title="Gemini API Proxy")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# 웹/앱 클라이언트와의 통신을 위한 CORS 설정
+# ── CORS 설정 ──────────────────────────────────────────────────────────
+# 허용된 프론트엔드 도메인만 API를 호출할 수 있도록 제한합니다.
+# (브라우저 기반 무단 호출 1차 차단. curl/스크립트는 Rate Limiter로 방어)
+ALLOWED_ORIGINS = [
+    "https://lecturebag.web.app",     # Firebase Hosting 프로덕션 URL
+    "https://lecturebag.firebaseapp.com",  # Firebase 기본 도메인
+    "http://localhost:5173",          # 로컬 Vite 개발 서버
+    "http://localhost:4173",          # 로컬 Vite 프리뷰 서버
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 MODELS = [
@@ -82,14 +100,15 @@ def list_available_models():
         return {"status": "error", "error_message": str(e)}
 
 @app.post("/api/generate", response_model=PromptResponse)
-async def generate_content(request: PromptRequest):
+@limiter.limit("20/minute")  # IP당 분당 20회 제한
+async def generate_content(request: Request, body: PromptRequest):
     client = get_client()
     last_err = None
     for model_name in MODELS:
         try:
             response = client.models.generate_content(
                 model=model_name,
-                contents=request.prompt
+                contents=body.prompt
             )
             return PromptResponse(text=response.text)
         except Exception as e:
@@ -99,11 +118,12 @@ async def generate_content(request: PromptRequest):
     raise HTTPException(status_code=500, detail=str(last_err))
 
 @app.post("/api/analyze-timetable", response_model=TimetableResponse)
-async def analyze_timetable(request: TimetableRequest):
+@limiter.limit("10/minute")  # 시간표 분석은 대용량 이미지 처리 → 보수적 제한
+async def analyze_timetable(request: Request, body: TimetableRequest):
     try:
         client = get_client()
         
-        base64_image = request.base64Image
+        base64_image = body.base64Image
         mime_match = re.match(r"^data:(image\/\w+);base64,", base64_image)
         mime_type = mime_match.group(1) if mime_match else "image/jpeg"
         base64_data = re.sub(r"^data:image\/\w+;base64,", "", base64_image)
@@ -154,17 +174,18 @@ Output strictly raw JSON without any markdown formatting or commentary.
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/summarize", response_model=SummaryResponse)
-async def summarize_content(request: SummaryRequest):
+@limiter.limit("10/minute")  # IP당 분당 10회 제한 (가장 무거운 AI 호출)
+async def summarize_content(request: Request, body: SummaryRequest):
     try:
         client = get_client()
         prompt = "내가 올리는 사진 혹은 음성 녹음에 있는 내용을 이해하기 쉽게 설명해줘. 내가 사진 혹은 음성 녹음을 계속 올릴 텐데, 그 전에 올렸던 사진과 음성 녹음의 내용들까지 합쳐서 정리하지 말고, 올린 사진의 내용만을 설명해줘. 내용을 자세하게 설명해줘. 정리한 내용을 Markdown 형식으로 정리해줘."
         
         contents = [prompt]
-        if request.fileDataUrl and request.fileDataUrl.startswith("data:"):
-            mime_match = re.match(r"^data:([a-zA-Z0-9-]+\/[a-zA-Z0-9-+.]+);base64,", request.fileDataUrl)
+        if body.fileDataUrl and body.fileDataUrl.startswith("data:"):
+            mime_match = re.match(r"^data:([a-zA-Z0-9-]+\/[a-zA-Z0-9-+.]+);base64,", body.fileDataUrl)
             mime_type = mime_match.group(1) if mime_match else "image/jpeg"
             
-            fn = request.fileName.lower()
+            fn = body.fileName.lower()
             if fn.endswith(".heic") or fn.endswith(".heif"):
                 mime_type = "image/heic"
             elif fn.endswith(".m4a"):
@@ -172,11 +193,11 @@ async def summarize_content(request: SummaryRequest):
             elif mime_type == "application/octet-stream":
                 mime_type = "image/jpeg"
                 
-            base64_data = re.sub(r"^data:([a-zA-Z0-9-]+\/[a-zA-Z0-9-+.]+);base64,", "", request.fileDataUrl)
+            base64_data = re.sub(r"^data:([a-zA-Z0-9-]+\/[a-zA-Z0-9-+.]+);base64,", "", body.fileDataUrl)
             file_bytes = base64.b64decode(base64_data)
             contents.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))
         else:
-            contents.append(f"[파일 데이터가 로드되지 않았습니다. 파일명: {request.fileName}]")
+            contents.append(f"[파일 데이터가 로드되지 않았습니다. 파일명: {body.fileName}]")
             
         last_err = None
         for model_name in MODELS:
