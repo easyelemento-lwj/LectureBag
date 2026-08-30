@@ -641,6 +641,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const hasSelectedAiDocs = selectedAiDocs.length > 0;
   const selectedMediaCount = activeSettingDetail === 'ai_center' ? selectedAiDocs.length : selectedExplorerFiles.length;
 
+  // True only when the folder has no subfolders (i.e. inside the deepest level containing individual files)
+  const isTerminalFolder = activeSettingDetail === null && ((storageMode === 'default' && navPath.length === 4) || (storageMode === 'timetable' && navPath.length === 5));
+
   const handleSaveNewName = () => {
     if (!renameModalItem) return;
     const trimmed = newDocName.trim();
@@ -1164,9 +1167,11 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
 
 
-  // Reset path expansion on navPath change
+  // Reset path expansion, reorder mode, and selections on navPath change
   React.useEffect(() => {
     setIsPathExpanded(false);
+    setIsReorderMode(false);
+    setReorderEntries([]);
   }, [navPath]);
 
   // Compute folder hierarchy and item counts for File Explorer (Photos & Audio ONLY)
@@ -1842,7 +1847,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       className="flex items-center gap-1.5 text-[11px] font-bold text-neutral-800 hover:text-black cursor-pointer"
                       title="달력에서 날짜 선택"
                     >
-                      <CalendarDays className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                      <CalendarDays className="w-3.5 h-3.5 text-black" />
                       <span>
                         {(() => {
                           const parts = (importTargetDate || '').split('-').map(Number);
@@ -1871,7 +1876,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     className="flex items-center gap-1.5 text-[11px] font-bold text-neutral-700 bg-neutral-100 hover:bg-neutral-200/80 border border-neutral-200/80 px-3 py-1.5 rounded-full shadow-2xs transition-all active:scale-95 cursor-pointer"
                     title="특정 날짜로 일괄 변경"
                   >
-                    <CalendarDays className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                    <CalendarDays className="w-3.5 h-3.5 text-black" />
                     <span>날짜 직접 지정</span>
                   </button>
                 )}
@@ -2587,12 +2592,12 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   </div>
                 ) : isReorderMode ? (
                   <div className="col-span-full space-y-4">
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-2xl p-4 flex items-center justify-between text-xs text-blue-950 shadow-2xs">
+                    <div className="bg-neutral-900 text-white rounded-2xl p-4 flex items-center justify-between text-xs shadow-md border border-neutral-800">
                       <div className="flex items-center gap-2.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
                         <div>
-                          <p className="font-bold">순서 변경 모드 (다중 묶음 이동 지원)</p>
-                          <p className="text-[11px] text-blue-700 mt-0.5">선택한 파일 묶음이나 개별 카드를 원하는 위치로 끌어당기세요</p>
+                          <p className="font-bold text-white">순서 변경 모드 (다중 묶음 이동 지원)</p>
+                          <p className="text-[11px] text-neutral-300 mt-0.5">선택한 파일 묶음이나 개별 카드를 원하는 위치로 끌어당기세요</p>
                         </div>
                       </div>
                     </div>
@@ -2614,21 +2619,21 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             <Reorder.Item
                               key={entry.id}
                               value={entry}
-                              className="relative z-50 cursor-grab active:cursor-grabbing rounded-2xl bg-gradient-to-r from-blue-50/90 to-indigo-50/60 border-2 border-blue-500 p-3.5 shadow-sm transition-all flex items-center justify-between gap-3 select-none touch-none active:shadow-xl active:scale-[1.02] ring-2 ring-blue-500/20"
+                              className="relative z-50 cursor-grab active:cursor-grabbing rounded-2xl bg-neutral-50/95 border-2 border-black p-3.5 shadow-sm transition-all flex items-center justify-between gap-3 select-none touch-none active:shadow-2xl active:scale-[1.02] ring-2 ring-black/10"
                               whileDrag={{
                                 scale: 1.04,
-                                boxShadow: "0 20px 25px -5px rgba(37, 99, 235, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.35), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
                                 zIndex: 99
                               }}
                             >
                               <div className="flex items-center gap-3 overflow-hidden min-w-0 flex-1 pointer-events-none">
                                 {/* Order Number Badge */}
-                                <div className="w-6 h-6 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center flex-shrink-0 shadow-2xs">
+                                <div className="w-6 h-6 rounded-full bg-black text-white text-[11px] font-black flex items-center justify-center flex-shrink-0 shadow-2xs">
                                   {idx + 1}
                                 </div>
 
                                 {/* Bundle Icon with prominent file count */}
-                                <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border-2 border-blue-500 bg-neutral-900 shadow-sm flex items-center justify-center">
+                                <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border-2 border-black bg-neutral-900 shadow-sm flex items-center justify-center">
                                   {firstFile.type === 'photo' && firstFile.dataUrl ? (
                                     <img
                                       src={firstFile.dataUrl}
@@ -2636,7 +2641,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                       className="absolute inset-0 w-full h-full object-cover opacity-50 blur-[0.5px]"
                                     />
                                   ) : (
-                                    <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-indigo-700 opacity-90" />
+                                    <div className="absolute inset-0 bg-neutral-800" />
                                   )}
                                   <div className="relative z-10 flex items-center justify-center text-white drop-shadow-md">
                                     <span className="text-sm font-black tracking-tight">{bundleCount}</span>
@@ -2647,18 +2652,18 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                 <div className="truncate min-w-0 flex-1">
                                   <p className="text-xs font-bold truncate text-neutral-900 flex items-center gap-1.5">
                                     <span>{firstFile.name}</span>
-                                    <span className="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[9px] font-black tracking-wider leading-none">
+                                    <span className="px-1.5 py-0.5 rounded bg-black text-white text-[9px] font-black tracking-wider leading-none">
                                       {bundleCount}개 묶음
                                     </span>
                                   </p>
-                                  <p className="text-[10px] text-blue-600 font-medium mt-0.5 truncate">
+                                  <p className="text-[10px] text-neutral-600 font-medium mt-0.5 truncate">
                                     {new Date(firstFile.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} • 통째로 이동
                                   </p>
                                 </div>
                               </div>
 
                               {/* Drag Handle Icon */}
-                              <div className="p-2 text-blue-600 flex-shrink-0 flex items-center justify-center pointer-events-none">
+                              <div className="p-2 text-neutral-800 flex-shrink-0 flex items-center justify-center pointer-events-none">
                                 <svg viewBox="0 0 24 24" className="w-5 h-5 stroke-[2.2]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
                                   <line x1="4" y1="9" x2="20" y2="9" />
                                   <line x1="4" y1="15" x2="20" y2="15" />
@@ -2678,10 +2683,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           <Reorder.Item
                             key={entry.id}
                             value={entry}
-                            className="relative z-50 cursor-grab active:cursor-grabbing rounded-2xl bg-white border border-neutral-200/90 p-3.5 shadow-sm transition-shadow flex items-center justify-between gap-3 select-none touch-none active:shadow-xl active:scale-[1.02] active:border-blue-500"
+                            className="relative z-50 cursor-grab active:cursor-grabbing rounded-2xl bg-white border border-neutral-200/90 p-3.5 shadow-sm transition-shadow flex items-center justify-between gap-3 select-none touch-none active:shadow-xl active:scale-[1.02] active:border-black active:ring-2 active:ring-black/10"
                             whileDrag={{
                               scale: 1.04,
-                              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
                               zIndex: 99
                             }}
                           >
@@ -2719,7 +2724,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                 <p className="text-xs font-bold truncate text-neutral-900 flex items-center gap-1.5">
                                   <span>{item.name}</span>
                                   {isNew && (
-                                    <span className="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[9px] font-black tracking-wider leading-none">
+                                    <span className="px-1.5 py-0.5 rounded bg-black text-white text-[9px] font-black tracking-wider leading-none">
                                       NEW
                                     </span>
                                   )}
@@ -2775,7 +2780,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           isSelected
                             ? 'border-neutral-900 bg-neutral-50 shadow-xs'
                             : newlyUploadedIds.includes(item.id)
-                            ? 'border-blue-500 ring-2 ring-blue-500/40 bg-blue-50/40 shadow-sm'
+                            ? 'border-neutral-900 ring-2 ring-neutral-900/20 bg-neutral-50/70 shadow-sm'
                             : 'bg-white border-neutral-200/80 hover:border-neutral-300'
                         }`}
                       >
@@ -2834,7 +2839,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             <h5 className="text-xs font-bold truncate text-neutral-900 flex items-center gap-1.5">
                               <span>{item.name}</span>
                               {newlyUploadedIds.includes(item.id) && (
-                                <span className="px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-[9px] font-black tracking-wider leading-none shadow-xs">
+                                <span className="px-1.5 py-0.5 rounded-md bg-black text-white text-[9px] font-black tracking-wider leading-none shadow-xs">
                                   NEW
                                 </span>
                               )}
@@ -3126,10 +3131,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             setNavPath([]);
                             showToast('디폴트 모드로 전환되었습니다.');
                           }}
-                          className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
                             storageMode === 'default'
-                              ? 'bg-black text-white shadow-xs'
-                              : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                              ? 'bg-black text-white border border-black shadow-xs'
+                              : 'bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50'
                           }`}
                         >
                           디폴트 모드 적용
@@ -3140,12 +3145,11 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             setNavPath([]);
                             showToast('시간표 모드 (연도 → 학기 → 과목 → 달 → 일)로 전환되었습니다.');
                           }}
-                          className="flex-1 py-2 rounded-xl text-xs font-bold transition-all"
-                          style={
+                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
                             storageMode === 'timetable'
-                              ? { backgroundColor: accentColor, color: '#000000' }
-                              : { backgroundColor: '#F5F5F5', color: '#525252' }
-                          }
+                              ? 'bg-black text-white border border-black shadow-xs'
+                              : 'bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50'
+                          }`}
                         >
                           시간표 모드 적용
                         </button>
@@ -3975,9 +3979,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   </button>
                 )}
 
-                {/* 2.2 순서 바꾸기 / 완료 버튼 */}
+                {/* 2.2 순서 바꾸기 / 완료 버튼 (하위 폴더가 없는 최하위 개별 파일 폴더에서만 활성화) */}
                 {activeSettingDetail !== 'ai_center' && !hasSelectedAiDocs && (
                   <button
+                    disabled={!isReorderMode && !isTerminalFolder}
                     onClick={() => {
                       if (isReorderMode) {
                         if (reorderEntries.length > 0) {
@@ -4000,6 +4005,12 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         setIsReorderMode(false);
                         setIsSelectionMode(false);
                         setSelectedItemIds([]);
+                        return;
+                      }
+
+                      // Guard: Only allow in leaf folder with individual files
+                      if (!isTerminalFolder) {
+                        showToast('하위 폴더가 없는 최종 파일 목록에서만 순서를 변경할 수 있습니다.');
                         return;
                       }
 
@@ -4047,12 +4058,20 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         showToast('카드를 원하는 위치로 드래그한 후 이 버튼을 한 번 더 누르면 완료됩니다.');
                       }
                     }}
-                    className={`w-14 h-14 rounded-full border-2 ring-2 transition-all flex items-center justify-center shadow-md ${
+                    className={`w-14 h-14 rounded-full border-2 ring-2 transition-all flex items-center justify-center ${
                       isReorderMode 
-                        ? 'bg-blue-600 border-blue-500 ring-blue-400 text-white shadow-blue-500/50 animate-pulse' 
-                        : 'bg-white border-neutral-200 ring-neutral-200/60 text-neutral-800 hover:text-black active:scale-90'
+                        ? 'bg-black border-black ring-neutral-800 text-white shadow-xl animate-pulse cursor-pointer' 
+                        : !isTerminalFolder
+                        ? 'bg-neutral-100/60 border-neutral-200/50 ring-neutral-200/30 text-neutral-300 cursor-not-allowed shadow-none pointer-events-none opacity-50'
+                        : 'bg-white border-neutral-200 ring-neutral-200/60 text-neutral-800 hover:text-black active:scale-90 shadow-md cursor-pointer'
                     }`}
-                    title={isReorderMode ? "순서 변경 완료 및 적용" : "순서 바꾸기"}
+                    title={
+                      isReorderMode 
+                        ? "순서 변경 완료 및 적용" 
+                        : !isTerminalFolder
+                        ? "하위 폴더가 없는 최종 파일 폴더에서만 순서 변경 가능"
+                        : "순서 바꾸기"
+                    }
                   >
                     <svg viewBox="0 0 24 24" className="w-6 h-6 stroke-[2]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M4 8h16M4 16h16M8 4l-4 4 4 4M16 20l4-4-4-4" />

@@ -120,9 +120,13 @@ export function useAppState() {
       const saved = localStorage.getItem('lecture_snap_photos');
       if (saved) {
         const parsed: CapturedPhoto[] = JSON.parse(saved);
+        // Filter out fake/dummy sample photos
+        const realPhotos = parsed.filter(
+          (p) => p.id !== 'sample_1' && (!p.dataUrl || !p.dataUrl.includes('PPT 슬라이드 #1'))
+        );
         // Migrate & Deduplicate
         const seenIds = new Set<string>();
-        return parsed.map((p) => {
+        return realPhotos.map((p) => {
           const ts = p.timestamp ?? new Date();
           const name = formatFileName(ts);
           let uniqueId = p.id;
@@ -143,20 +147,7 @@ export function useAppState() {
     } catch (e) {
       console.error(e);
     }
-    // 기본 샘플 데이터도 포맷 적용
-    const sampleTime = new Date(Date.now() - 3600000);
-    return [
-      {
-        id: `photo_${formatFileName(sampleTime)}`,
-        dataUrl:
-          'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200"><rect width="300" height="200" fill="%231c1c1e"/><text x="50%" y="50%" fill="%23ffffff" font-size="14" font-family="sans-serif" text-anchor="middle">PPT 슬라이드 #1</text></svg>',
-        timestamp: sampleTime,
-        mode: 'PPT/판서',
-        width: 1080,
-        height: 1440,
-        folderName: formatFileName(sampleTime),
-      },
-    ];
+    return [];
   });
 
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
@@ -167,9 +158,16 @@ export function useAppState() {
       const saved = localStorage.getItem('lecture_snap_recordings');
       if (saved) {
         const parsed: RecordedAudio[] = JSON.parse(saved);
+        // Filter out fake/dummy sample recordings
+        const realRecordings = parsed.filter(
+          (r) =>
+            r.id !== 'rec_sample_1' &&
+            !(r.duration === '45:12' && r.size === '18.4 MB') &&
+            (!r.name || !r.name.includes('컴퓨터구조 12주차 강의 녹음'))
+        );
         // Migrate & Deduplicate
         const seenIds = new Set<string>();
-        return parsed.map((r) => {
+        return realRecordings.map((r) => {
           const ts = r.timestamp ?? new Date();
           const name = formatFileName(ts);
           const needsMigration = !r.name.match(/^\d{8}_\d{4}/);
@@ -190,17 +188,7 @@ export function useAppState() {
     } catch (e) {
       console.error(e);
     }
-    // 기본 샘플 데이터도 포맷 적용
-    const sampleTime = new Date(Date.now() - 86400000);
-    return [
-      {
-        id: `rec_${formatFileName(sampleTime)}`,
-        name: `${formatFileName(sampleTime)}.m4a`,
-        duration: '45:12',
-        timestamp: sampleTime.toISOString(),
-        size: '18.4 MB',
-      },
-    ];
+    return [];
   });
 
   // ── Camera Stream ──────────────────────────────────────────────────────

@@ -61,7 +61,10 @@ export const VaultIosMain: React.FC = () => {
         }
         const cleanDataUrl = cleanCanvas.toDataURL('image/jpeg', 0.92);
 
-        return parsed.map((p) => ({
+        const filtered = parsed.filter(
+          (p) => p.id !== 'sample_1' && (!p.dataUrl || !p.dataUrl.includes('PPT 슬라이드 #1'))
+        );
+        return filtered.map((p) => ({
           ...p,
           dataUrl: p.dataUrl.startsWith('data:image/svg') ? p.dataUrl : cleanDataUrl,
         }));
@@ -69,39 +72,30 @@ export const VaultIosMain: React.FC = () => {
     } catch (e) {
       console.error(e);
     }
-    return [
-      {
-        id: 'sample_1',
-        dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200"><rect width="300" height="200" fill="%231c1c1e"/><text x="50%" y="50%" fill="%23ffffff" font-size="14" font-family="sans-serif" text-anchor="middle">PPT 슬라이드 #1</text></svg>',
-        timestamp: new Date(Date.now() - 3600000),
-        mode: 'PPT/판서',
-        width: 1080,
-        height: 1440
-      }
-    ];
+    return [];
   });
 
   // Audio Recordings state from LocalStorage
   const [recordings, setRecordings] = useState<RecordedAudio[]>(() => {
     try {
       const saved = localStorage.getItem('lecture_snap_recordings');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: RecordedAudio[] = JSON.parse(saved);
+        return parsed.filter(
+          (r) =>
+            r.id !== 'rec_sample_1' &&
+            !(r.duration === '45:12' && r.size === '18.4 MB') &&
+            (!r.name || !r.name.includes('컴퓨터구조 12주차 강의 녹음'))
+        );
+      }
     } catch (e) {
       console.error(e);
     }
-    return [
-      {
-        id: 'rec_sample_1',
-        name: '컴퓨터구조 12주차 강의 녹음.m4a',
-        duration: '45:12',
-        timestamp: new Date(Date.now() - 86400000).toISOString(),
-        size: '18.4 MB'
-      }
-    ];
+    return [];
   });
 
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
-  const [selectedQueueItems, setSelectedQueueItems] = useState<string[]>(['yt_1', 'insta_1']);
+  const [selectedQueueItems, setSelectedQueueItems] = useState<string[]>([]);
 
   // Camera Stream Refs & Status
   const videoRef = useRef<HTMLVideoElement | null>(null);
