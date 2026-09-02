@@ -1,4 +1,5 @@
 import { TimetableEntry } from '../types';
+import { auth } from './firebase';
 
 const PROXY_SERVER_URL = import.meta.env.VITE_PROXY_SERVER_URL || 'https://lecturebag-production.up.railway.app';
 
@@ -7,10 +8,12 @@ export async function analyzeTimetableImage(base64Image: string, apiKey?: string
 
   // 1. 프록시 서버(Railway)를 통한 요청 시도
   try {
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
     const res = await fetch(`${PROXY_SERVER_URL}/api/analyze-timetable`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
       },
       body: JSON.stringify({ base64Image }),
     });
@@ -107,10 +110,12 @@ export async function generateAiSummary(fileDataUrl: string | undefined, fileNam
 
   // 1. 프록시 서버(Railway)를 통한 요청 시도
   try {
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : '';
     const res = await fetch(`${PROXY_SERVER_URL}/api/summarize`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
       },
       body: JSON.stringify({ fileDataUrl, fileName }),
     });

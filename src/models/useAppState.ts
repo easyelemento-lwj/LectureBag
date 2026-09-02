@@ -12,6 +12,7 @@ import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
 import { useDeviceType } from '../hooks/useDeviceType';
 import { get, set } from 'idb-keyval';
 import { compressImage } from '../utils/imageCompression';
+import { useAuth } from '../hooks/useAuth';
 
 declare global {
   interface Window {
@@ -35,6 +36,7 @@ function formatFileName(date: Date | string): string {
 }
 
 export function useAppState() {
+  const { user } = useAuth();
   const [isDataLoaded, setIsDataLoaded] = React.useState(false);
   const deviceType = useDeviceType();
 
@@ -135,6 +137,7 @@ export function useAppState() {
 
   // ── IndexedDB Async Loading ────────────────────────────────────────────
   useEffect(() => {
+    let isMounted = true;
     async function requestPersistentStorage() {
       if (navigator.storage && navigator.storage.persist) {
         try {
@@ -147,41 +150,52 @@ export function useAppState() {
 
     async function loadData() {
       try {
+        setIsDataLoaded(false);
         await requestPersistentStorage();
         
+        const photosKey = user ? `lecture_snap_photos_${user.uid}` : 'lecture_snap_photos';
+        const recsKey = user ? `lecture_snap_recordings_${user.uid}` : 'lecture_snap_recordings';
+        const ttKey = user ? `lecture_snap_semester_timetables_${user.uid}` : 'lecture_snap_semester_timetables';
+
         const [savedPhotos, savedRecs, savedTimetables] = await Promise.all([
-          get('lecture_snap_photos'),
-          get('lecture_snap_recordings'),
-          get('lecture_snap_semester_timetables'),
+          get(photosKey),
+          get(recsKey),
+          get(ttKey),
         ]);
 
-        if (savedPhotos) setPhotos(savedPhotos);
-        if (savedRecs) setRecordings(savedRecs);
-        if (savedTimetables) setTimetables(savedTimetables);
+        if (!isMounted) return;
+
+        setPhotos(savedPhotos || []);
+        setRecordings(savedRecs || []);
+        setTimetables(savedTimetables || []);
       } catch (e) {
         console.error('Failed to load data from IDB:', e);
       } finally {
-        setIsDataLoaded(true);
+        if (isMounted) setIsDataLoaded(true);
       }
     }
     loadData();
-  }, []);
+    return () => { isMounted = false; };
+  }, [user]);
 
   // ── IndexedDB Auto Save ────────────────────────────────────────────────
   useEffect(() => {
     if (!isDataLoaded) return;
-    set('lecture_snap_photos', photos).catch(console.error);
-  }, [photos, isDataLoaded]);
+    const photosKey = user ? `lecture_snap_photos_${user.uid}` : 'lecture_snap_photos';
+    set(photosKey, photos).catch(console.error);
+  }, [photos, isDataLoaded, user]);
 
   useEffect(() => {
     if (!isDataLoaded) return;
-    set('lecture_snap_recordings', recordings).catch(console.error);
-  }, [recordings, isDataLoaded]);
+    const recsKey = user ? `lecture_snap_recordings_${user.uid}` : 'lecture_snap_recordings';
+    set(recsKey, recordings).catch(console.error);
+  }, [recordings, isDataLoaded, user]);
 
   useEffect(() => {
     if (!isDataLoaded) return;
-    set('lecture_snap_semester_timetables', timetables).catch(console.error);
-  }, [timetables, isDataLoaded]);
+    const ttKey = user ? `lecture_snap_semester_timetables_${user.uid}` : 'lecture_snap_semester_timetables';
+    set(ttKey, timetables).catch(console.error);
+  }, [timetables, isDataLoaded, user]);
 
 
   const showToast = useCallback((_msg: string) => {

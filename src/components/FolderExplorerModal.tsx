@@ -45,6 +45,7 @@ import { getFolderHierarchyFromDate, getSampleMediaFiles, extractSmartFileDate }
 import { useAccentColor } from '../context/AccentColorContext';
 import { analyzeTimetableImage, generateAiSummary } from '../utils/gemini';
 import { MarkdownViewer } from './MarkdownViewer';
+import { useAuth } from '../hooks/useAuth';
 
 export const getPersistedAiDocs = (): MediaFile[] => {
   try {
@@ -546,6 +547,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   timetables,
   setTimetables
 }) => {
+  const { user, signInWithGoogle, signOut } = useAuth();
   const { accentColor } = useAccentColor();
   // Folder Navigation Level Path:
   // Level 0: [] -> Root (Years list)
@@ -2961,13 +2963,17 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-pink-500/10 text-pink-500 flex items-center justify-center">
-                            <User className="w-5 h-5" />
-                          </div>
+                          {user?.photoURL ? (
+                            <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl object-cover shadow-sm" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl bg-pink-500/10 text-pink-500 flex items-center justify-center">
+                              <User className="w-5 h-5" />
+                            </div>
+                          )}
                           <div>
-                            <h4 className="text-sm font-bold text-neutral-900">회원정보</h4>
+                            <h4 className="text-sm font-bold text-neutral-900">{user ? user.displayName || 'Google 사용자' : '로그인이 필요합니다'}</h4>
                             <p className="text-[11px] text-neutral-400 mt-0.5">
-                              easyelemento@gmail.com
+                              {user ? user.email : 'Google 계정으로 계속하기'}
                             </p>
                           </div>
                         </div>
@@ -3056,35 +3062,76 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 {/* Sub-view: 회원정보 */}
                 {activeSettingDetail === 'profile' && (
                   <div className="space-y-3">
-                    <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-full bg-pink-500/10 text-pink-500 flex items-center justify-center font-bold text-lg shadow-xs">
-                          <User className="w-7 h-7" />
+                    {user ? (
+                      <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-4">
+                        <div className="flex items-center gap-4">
+                          {user.photoURL ? (
+                            <img src={user.photoURL} alt="Profile" className="w-14 h-14 rounded-full object-cover shadow-xs border border-neutral-100" />
+                          ) : (
+                            <div className="w-14 h-14 rounded-full bg-pink-500/10 text-pink-500 flex items-center justify-center font-bold text-lg shadow-xs">
+                              <User className="w-7 h-7" />
+                            </div>
+                          )}
+                          <div>
+                            <h4 className="text-base font-bold text-neutral-900">{user.displayName || 'Google 사용자'}</h4>
+                            <p className="text-xs text-neutral-500">{user.email}</p>
+                            <span className="inline-block mt-1 bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                              Google 계정 연동됨
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-neutral-100 pt-3 space-y-2 text-xs">
+                          <div className="flex justify-between text-neutral-600">
+                            <span>계정 식별자(UID)</span>
+                            <span className="font-mono text-[10px] text-neutral-400 truncate max-w-[150px]">{user.uid}</span>
+                          </div>
+                          <div className="flex justify-between text-neutral-600">
+                            <span>자동 동기화</span>
+                            <span className="font-semibold text-emerald-600">클라우드 대기중</span>
+                          </div>
+                        </div>
+
+                        <div className="pt-2">
+                          <button
+                            onClick={async () => {
+                              await signOut();
+                              showToast('로그아웃 되었습니다.');
+                            }}
+                            className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-sm font-bold transition-colors"
+                          >
+                            로그아웃
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white p-6 rounded-2xl border border-neutral-200/80 shadow-2xs flex flex-col items-center text-center space-y-4">
+                        <div className="w-16 h-16 rounded-2xl bg-neutral-100 flex items-center justify-center shadow-inner">
+                          <svg className="w-8 h-8" viewBox="0 0 24 24">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                          </svg>
                         </div>
                         <div>
-                          <h4 className="text-base font-bold text-neutral-900">easyelemento</h4>
-                          <p className="text-xs text-neutral-500">easyelemento@gmail.com</p>
-                          <span className="inline-block mt-1 bg-pink-100 text-pink-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                            프리미엄 회원
-                          </span>
+                          <h4 className="text-base font-bold text-neutral-900 mb-1">Google 로그인</h4>
+                          <p className="text-xs text-neutral-500 leading-relaxed">
+                            로그인하여 내 기기 간 시간표와 노트를<br/>안전하게 클라우드에 연동하세요.
+                          </p>
                         </div>
+                        <button
+                          onClick={async () => {
+                            const res = await signInWithGoogle();
+                            if (res.error) showToast(res.error);
+                            else showToast('로그인 성공!');
+                          }}
+                          className="w-full py-3 bg-black hover:bg-neutral-800 text-white rounded-xl text-sm font-bold transition-all active:scale-[0.98] shadow-md flex items-center justify-center gap-2"
+                        >
+                          Google 계정으로 계속하기
+                        </button>
                       </div>
-
-                      <div className="border-t border-neutral-100 pt-3 space-y-2 text-xs">
-                        <div className="flex justify-between text-neutral-600">
-                          <span>가입 날짜</span>
-                          <span className="font-semibold text-neutral-900">2026.08.01</span>
-                        </div>
-                        <div className="flex justify-between text-neutral-600">
-                          <span>저장 공간</span>
-                          <span className="font-semibold text-neutral-900">12.4 GB / 100 GB</span>
-                        </div>
-                        <div className="flex justify-between text-neutral-600">
-                          <span>자동 동기화</span>
-                          <span className="font-semibold text-emerald-600">활성화됨</span>
-                        </div>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 )}
 
