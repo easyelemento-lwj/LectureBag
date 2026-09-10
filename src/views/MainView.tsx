@@ -1,7 +1,7 @@
 /**
  * MainView.tsx — MainView equivalent
  *
- * Top-level view for LectureSnap.
+ * Top-level view for LectureBag.
  * Responsibilities:
  *   1. Calls useAppState() to get all shared state & handlers (DataModel)
  *   2. Decides layout — composes CameraViewport + BottomNav + Modals

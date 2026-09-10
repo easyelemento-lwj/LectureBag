@@ -2966,7 +2966,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           {user?.photoURL ? (
                             <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl object-cover shadow-sm" />
                           ) : (
-                            <div className="w-10 h-10 rounded-xl bg-pink-500/10 text-pink-500 flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                               <User className="w-5 h-5" />
                             </div>
                           )}
@@ -2986,7 +2986,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                             <CalendarDays className="w-5 h-5" />
                           </div>
                           <div>
@@ -3005,7 +3005,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                             <Sparkles className="w-5 h-5" />
                           </div>
                           <div>
@@ -3024,7 +3024,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-neutral-500/10 text-neutral-700 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                             <SlidersHorizontal className="w-5 h-5" />
                           </div>
                           <div>
@@ -3043,7 +3043,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                             <Info className="w-5 h-5" />
                           </div>
                           <div>
@@ -3068,7 +3068,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           {user.photoURL ? (
                             <img src={user.photoURL} alt="Profile" className="w-14 h-14 rounded-full object-cover shadow-xs border border-neutral-100" />
                           ) : (
-                            <div className="w-14 h-14 rounded-full bg-pink-500/10 text-pink-500 flex items-center justify-center font-bold text-lg shadow-xs">
+                            <div className="w-14 h-14 rounded-full bg-neutral-100 text-neutral-800 flex items-center justify-center font-bold text-lg shadow-xs">
                               <User className="w-7 h-7" />
                             </div>
                           )}
@@ -3147,7 +3147,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     />
                     <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                           <CalendarDays className="w-5 h-5" />
                         </div>
                         <div>
@@ -3156,18 +3156,15 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200/60 text-xs text-neutral-600 space-y-1.5">
-                        <p className="font-bold text-neutral-800">
+                      <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200/60 text-xs space-y-1.5">
+                        <p className="font-bold text-neutral-900">
                           • 현재 설정된 모드:{' '}
-                          <span
-                            className="font-bold"
-                            style={{ color: storageMode === 'timetable' ? accentColor : '#404040' }}
-                          >
+                          <span className="font-extrabold text-black underline decoration-neutral-300 underline-offset-2">
                             {storageMode === 'timetable' ? '시간표 모드 (연도 → 학기 → 과목 → 달 → 일)' : '디폴트 모드 (연도 → 상하반기 → 달 → 일)'}
                           </span>
                         </p>
-                        <p className="text-neutral-500">• 디폴트 모드: 연도 → 상하반기 → 달 → 일 순 자동 분류</p>
-                        <p className="text-neutral-500">• 시간표 모드: 시간표 사진을 등록하면 강의 시간에 맞게 사진 및 녹음 파일이 [연도 → 1학기/2학기 → 과목 → 달 → 일] 순의 하위 폴더로 자동 연결되어 저장됩니다.</p>
+                        <p className="text-neutral-700 leading-relaxed font-medium">• 디폴트 모드: 연도 → 상하반기 → 달 → 일 순 자동 분류</p>
+                        <p className="text-neutral-700 leading-relaxed font-medium">• 시간표 모드: 시간표 사진을 등록하면 강의 시간에 맞게 사진 및 녹음 파일이 [연도 → 1학기/2학기 → 과목 → 달 → 일] 순의 하위 폴더로 자동 연결되어 저장됩니다.</p>
                       </div>
 
                       {/* Storage Mode Toggle Buttons inside Settings */}
@@ -3726,25 +3723,17 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   <div className="space-y-3">
                     <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-neutral-500/10 text-neutral-700 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                           <SlidersHorizontal className="w-5 h-5" />
                         </div>
                         <div>
                           <h4 className="text-sm font-bold text-neutral-900">환경설정</h4>
-                          <p className="text-[11px] text-neutral-400">시스템 옵션 및 API 연동</p>
+                          <p className="text-[11px] text-neutral-400">시스템 옵션 및 환경설정</p>
                         </div>
                       </div>
 
-                      <div className="space-y-2 pt-2 border-t border-neutral-100">
-                        <label className="text-xs font-bold text-neutral-800 block">Gemini API Key</label>
-                        <p className="text-[11px] text-neutral-500 mb-2">시간표 자동 인식을 위해 Google Gemini API Key가 필요합니다.</p>
-                        <input
-                          type="password"
-                          value={geminiApiKey}
-                          onChange={(e) => setGeminiApiKey(e.target.value)}
-                          placeholder="AIzaSy..."
-                          className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all"
-                        />
+                      <div className="py-6 text-center border-t border-neutral-100">
+                        <p className="text-xs text-neutral-500 font-medium">추가 설정 가능한 옵션이 준비 중입니다.</p>
                       </div>
                     </div>
                   </div>
@@ -3755,7 +3744,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   <div className="space-y-3">
                     <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
                           <Info className="w-5 h-5" />
                         </div>
                         <div>
