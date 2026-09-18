@@ -636,7 +636,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     fileNames: string[];
     startTime: string;
     progress: number;
-    status: 'processing' | 'completed';
+    status: 'processing' | 'completed' | 'error';
     currentStep: string;
     resultFileName: string;
     resultSize: string;
@@ -3886,7 +3886,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   <span className="text-xs font-extrabold text-neutral-800 bg-neutral-100 px-2.5 py-1 rounded-full border border-neutral-200 shrink-0">
-                                    {session.progress}%
+                                    {session.status === 'error' ? '실패' : `${session.progress}%`}
                                   </span>
                                   <button
                                     onClick={() => {
@@ -3903,12 +3903,22 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                 </div>
                               </div>
 
+                              <p
+                                role={session.status === 'error' ? 'alert' : 'status'}
+                                className={`text-xs break-words ${session.status === 'error' ? 'text-rose-600 font-semibold' : 'text-neutral-500'}`}
+                              >
+                                {session.currentStep}
+                              </p>
+                              {session.status === 'processing' && (
+                                <p className="text-[11px] text-neutral-400">진행률은 완료된 파일 기준입니다. 첫 파일을 분석하는 동안에는 0%로 표시됩니다.</p>
+                              )}
+
                               {/* Progress bar */}
                               <div className="w-full h-2.5 bg-neutral-100 rounded-full overflow-hidden">
                                 <motion.div
                                   className="h-full bg-neutral-900"
                                   initial={{ width: 0 }}
-                                  animate={{ width: `${session.progress}%` }}
+                                  animate={{ width: `${session.status === 'error' ? '실패' : `${session.progress}%`}` }}
                                   transition={{ duration: 0.5 }}
                                 />
                               </div>
