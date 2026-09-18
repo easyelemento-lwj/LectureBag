@@ -13,7 +13,7 @@
 - Redis 원자 연산으로 사용자별 분당/일일 요청 수, 전체 일일 요청 수와 동시 처리 수를 제한합니다. Redis가 없거나 실패하면 AI 요청을 차단합니다.
 - 오류 응답에 업스트림 상세 메시지, 사용자 입력, 비밀키가 노출되지 않도록 했습니다.
 - Firebase Hosting에 클릭재킹 방지, nosniff, Referrer/Permissions 정책을 추가했습니다. 기본 CSP의 frame-ancestors/object-src/base-uri는 강제 적용하며 전체 스크립트/연결 CSP는 Report-Only입니다. 실제 Google 로그인 등 확인 후 강제로 전환해야 합니다.
-- 사용하지 않는 express, @types/express, @google/genai 프론트엔드 의존성을 제거했습니다. 서버 의존성은 requirements.lock으로 고정하고 requirements.txt에서 이를 사용합니다.
+- 사용하지 않는 express, @types/express, @google/genai 프론트엔드 의존성을 제거했습니다. 서버 의존성은 버전을 고정하고 requirements.txt에 직접 기재합니다. requirements.lock은 동일한 검증 버전 목록입니다.
 - Markdown 링크는 http/https/mailto만 허용합니다.
 - scripts/check_secrets.py는 staged 추가 행에 포함된 키 형태의 값을 출력 없이 검사합니다. python3 scripts/check_secrets.py로 커밋 전에 실행하거나 CI에 연결할 수 있습니다. 과거 키의 폐기를 대체하지 않습니다.
 
@@ -41,7 +41,7 @@ Railway 등 백엔드 환경에 다음을 설정합니다. 실제 비밀값은 �
 
 인증 정보나 Redis가 없는 상태에서 새 백엔드를 배포하면 AI 기능은 503으로 차단됩니다. 설정을 완료한 뒤 백엔드를 배포하고, 유효한 사용자로 소규모 기능 확인 후 프론트엔드를 배포해야 합니다. 프론트엔드 전체 CSP는 우선 Report-Only에서 Google 로그인·카메라·녹음·AI 호출의 위반 로그를 확인합니다.
 
-requirements.txt는 잠금 파일을 참조합니다. pip는 취약점 수정 버전(검증 환경 26.2 이상)을 사용합니다. requirements.in은 직접 의존성 갱신용입니다. 사용한 모델이나 프록시 호스트를 변경하면 CSP 연결 대상도 점검해야 합니다.
+Railway의 설치 단계에 별도 잠금 파일이 복사되지 않으므로 requirements.txt에 고정 버전 목록을 직접 기재합니다. requirements.lock과 동일하게 유지합니다. pip는 취약점 수정 버전(검증 환경 26.2 이상)을 사용합니다. requirements.in은 직접 의존성 갱신용입니다. 사용한 모델이나 프록시 호스트를 변경하면 CSP 연결 대상도 점검해야 합니다.
 
 ## 키 폐기와 Git 과거 이력
 
