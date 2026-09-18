@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from google import genai
-from google.genai import types
+from google.genai import types, errors
 from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
 from api_security import AiQuota, MAX_FILE_BYTES, RequestBoundary
@@ -143,7 +143,7 @@ async def generate(uid: str, contents, *, json_output=False):
         try:
             async with client.aio as ai:
                 response = await asyncio.wait_for(ai.models.generate_content(
-                    model=os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash'), contents=contents,
+                    model=os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash'), contents=contents,
                     config=types.GenerateContentConfig(max_output_tokens=4096,
                         response_mime_type='application/json' if json_output else 'text/plain')),
                     timeout=55)
@@ -154,6 +154,13 @@ async def generate(uid: str, contents, *, json_output=False):
             raise HTTPException(504, 'AI 처리 시간이 초과되었습니다.') from None
         except HTTPException:
             raise
+        except errors.APIError as exc:
+            # Emit only a bounded category; never provider messages or credentials.
+            code = {400: 'AI_INPUT_REJECTED', 401: 'AI_KEY_REJECTED',
+                    403: 'AI_KEY_REJECTED', 404: 'AI_MODEL_UNAVAILABLE',
+                    429: 'AI_PROVIDER_QUOTA'}.get(exc.code, 'AI_PROVIDER_ERROR')
+            logger.warning('ai_provider_failed category=%s', code)
+            raise HTTPException(502, {'code': code}) from None
         except Exception:
             # Do not put API keys, request bodies or upstream error text in responses/logs.
             raise HTTPException(502, 'AI 요청을 처리하지 못했습니다.') from None

@@ -35,7 +35,7 @@ Railway 등 백엔드 환경에 다음을 설정합니다. 실제 비밀값은 �
 | FIREBASE_PROJECT_ID | 운영 Firebase 프로젝트 ID |
 | FIREBASE_SERVICE_ACCOUNT_JSON 또는 ADC | Firebase Admin의 토큰 취소/계정 정지 조회에 필요한 서버 인증. 최소 권한으로 사용자 조회 권한을 부여 |
 | REDIS_URL | 모든 API 인스턴스가 공유할 Redis. 비공개 네트워크/인증 및 외부 연결 시 TLS 사용 |
-| GEMINI_MODEL | 기본 gemini-2.5-flash. 운영 프로젝트에서 지원하는 모델 확인 |
+| GEMINI_MODEL | 기본 gemini-3.5-flash. 운영 프로젝트에서 지원하는 모델 확인 |
 
 기본 한도는 사용자별 10회/분, 50회/일, 전체 1,000회/일, 사용자 동시 2개, 전체 동시 4개입니다. .env.example의 AI_* 변수로 조정합니다. 일일 창은 UTC 기준입니다. 요청 횟수 한도이지 금액 기반 과금 상한은 아니므로 Google Cloud 예산·할당량도 별도 설정해야 합니다.
 

@@ -28,6 +28,16 @@ async function requestAi<T>(path: string, body: unknown): Promise<T> {
         429: '사용 한도에 도달했습니다. 잠시 후 다시 시도해주세요.',
         503: 'AI 서비스를 잠시 사용할 수 없습니다.', 504: 'AI 처리 시간이 초과되었습니다.',
       };
+      const providerMessages: Record<string, string> = {
+        AI_MODEL_UNAVAILABLE: '서버에 설정된 AI 모델을 사용할 수 없습니다. 모델 설정 확인이 필요합니다.',
+        AI_KEY_REJECTED: 'AI 서버의 키 또는 사용 권한을 확인해야 합니다.',
+        AI_PROVIDER_QUOTA: 'AI 제공 서비스의 사용량 한도에 도달했습니다. 한도 또는 결제 설정을 확인해주세요.',
+        AI_INPUT_REJECTED: 'AI 서비스가 자료 형식을 처리하지 못했습니다. 다른 사진이나 음성 파일로 시도해주세요.',
+        AI_PROVIDER_ERROR: 'AI 제공 서비스에서 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+      };
+      const payload = await res.json().catch(() => null);
+      const code = payload?.detail?.code;
+      if (typeof code === 'string' && Object.hasOwn(providerMessages, code)) throw new Error(providerMessages[code]);
       throw new Error(messages[res.status] || 'AI 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.');
     }
     if (auth.currentUser?.uid !== user.uid) throw new Error('로그인 상태가 변경되었습니다.');

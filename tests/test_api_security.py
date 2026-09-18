@@ -107,7 +107,11 @@ def test_distributed_quota_limits_and_releases_leases(monkeypatch):
     asyncio.run(run())
 
 
-def test_upstream_error_sanitized_and_output_bound(monkeypatch):
+@pytest.mark.parametrize('provider_status,expected_code', [
+    (None, None), (400, 'AI_INPUT_REJECTED'), (403, 'AI_KEY_REJECTED'),
+    (404, 'AI_MODEL_UNAVAILABLE'), (429, 'AI_PROVIDER_QUOTA'), (500, 'AI_PROVIDER_ERROR'),
+])
+def test_upstream_error_sanitized_and_output_bound(monkeypatch, caplog, provider_status, expected_code):
     login()
     class Quota:
         def slot(self, uid):
@@ -123,6 +127,8 @@ def test_upstream_error_sanitized_and_output_bound(monkeypatch):
         async def __aexit__(self, *args): pass
         async def generate_content(self, **kwargs):
             assert kwargs['config'].max_output_tokens == 4096
+            if provider_status:
+                raise api.errors.APIError(provider_status, {'error': {'message': 'LEAKED-SECRET-KEY'}})
             raise RuntimeError('LEAKED-SECRET-KEY')
         def close(self): pass
     monkeypatch.setattr(api, 'quota', Quota())
@@ -130,6 +136,9 @@ def test_upstream_error_sanitized_and_output_bound(monkeypatch):
     response = request('POST', '/api/generate', json={'prompt': 'test'})
     assert response.status_code == 502
     assert 'LEAKED' not in response.text
+    assert 'LEAKED' not in caplog.text
+    if expected_code:
+        assert response.json()['detail']['code'] == expected_code
     assert response.headers['x-content-type-options'] == 'nosniff'
 
 
