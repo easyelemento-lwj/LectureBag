@@ -5,8 +5,12 @@
  * used across MainView, CameraViewport, BottomNav, and CameraHUD.
  * No rendering logic lives here.
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { CapturedPhoto, FlashMode, RecordedAudio, TimetableEntry, AspectRatio } from '../types';
+import { saveMedia } from '../utils/mediaStorage';
+import { accountKey } from '../utils/accountStorage';
+import { useTrash } from '../context/TrashContext';
+import { getSampleMediaFiles } from '../utils/dateFolders';
 import { playShutterSound } from '../utils/audio';
 import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
 import { useDeviceType } from '../hooks/useDeviceType';
@@ -37,6 +41,10 @@ function formatFileName(date: Date | string): string {
 
 export function useAppState() {
   const { user } = useAuth();
+  const uid = user?.uid ?? 'guest';
+  const { entries: trashEntries, moveToTrash } = useTrash();
+  const purgedIds = useMemo(() => new Set(trashEntries.filter(entry => entry.purged).map(entry => entry.file.id)), [trashEntries]);
+  const trashedIds = new Set(trashEntries.filter(entry => !entry.restored).map(entry => entry.file.id));
   const [isDataLoaded, setIsDataLoaded] = React.useState(false);
   const deviceType = useDeviceType();
 
@@ -45,21 +53,17 @@ export function useAppState() {
   const [isFolderExplorerOpen, setIsFolderExplorerOpen] = useState<boolean>(false);
 
   // ── Gemini & Timetable ─────────────────────────────────────────────────
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    return localStorage.getItem('lecture_snap_gemini_api_key') || '';
-  });
-  
   const [timetableImage, setTimetableImage] = useState<string | null>(() => {
-    return localStorage.getItem('lecture_snap_timetable_image') || null;
+    return localStorage.getItem(accountKey(uid, 'lecture_snap_timetable_image')) || null;
   });
 
   const [storageMode, setStorageMode] = useState<'default' | 'timetable'>(() => {
-    return (localStorage.getItem('lecture_snap_storage_mode') as 'default' | 'timetable') || 'default';
+    return (localStorage.getItem(accountKey(uid, 'lecture_snap_storage_mode')) as 'default' | 'timetable') || 'default';
   });
 
   const [timetableEntries, setTimetableEntries] = useState<TimetableEntry[]>(() => {
     try {
-      const saved = localStorage.getItem('lecture_snap_timetable_entries');
+      const saved = localStorage.getItem(accountKey(uid, 'lecture_snap_timetable_entries'));
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
@@ -70,31 +74,20 @@ export function useAppState() {
   const [timetables, setTimetables] = useState<any[]>([]);
 
   useEffect(() => {
-    // ── Obsolete LocalStorage Keys Clean-up ────────────────────────────────
-    try {
-      localStorage.removeItem('lecture_snap_timetable_entries');
-      localStorage.removeItem('lecture_snap_timetable_image');
-      localStorage.removeItem('doc_sample_1');
-      localStorage.removeItem('ai_doc_sample_1');
-    } catch (e) {
-      console.error('Failed to clean obsolete localStorage keys:', e);
-    }
+    // Remove obsolete client-side credentials; never load another account's key.
+    localStorage.removeItem('lecture_snap_gemini_api_key');
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('lecture_snap_gemini_api_key', geminiApiKey);
-  }, [geminiApiKey]);
-
-  useEffect(() => {
     if (timetableImage) {
-      localStorage.setItem('lecture_snap_timetable_image', timetableImage);
+      localStorage.setItem(accountKey(uid, 'lecture_snap_timetable_image'), timetableImage);
     } else {
-      localStorage.removeItem('lecture_snap_timetable_image');
+      localStorage.removeItem(accountKey(uid, 'lecture_snap_timetable_image'));
     }
   }, [timetableImage]);
 
   useEffect(() => {
-    localStorage.setItem('lecture_snap_storage_mode', storageMode);
+    localStorage.setItem(accountKey(uid, 'lecture_snap_storage_mode'), storageMode);
   }, [storageMode]);
 
 
@@ -106,6 +99,13 @@ export function useAppState() {
 
   // ── Recordings ─────────────────────────────────────────────────────────
   const [recordings, setRecordings] = useState<RecordedAudio[]>([]);
+
+  useEffect(() => {
+    if (!purgedIds.size) return;
+    setPhotos(prev => prev.some(photo => purgedIds.has(photo.id)) ? prev.filter(photo => !purgedIds.has(photo.id)) : prev);
+    setRecordings(prev => prev.some(recording => purgedIds.has(recording.id)) ? prev.filter(recording => !purgedIds.has(recording.id)) : prev);
+    setSelectedPhotoIds(prev => prev.filter(id => !purgedIds.has(id)));
+  }, [purgedIds, photos, recordings]);
 
   // ── Camera Stream ──────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -165,8 +165,8 @@ export function useAppState() {
 
         if (!isMounted) return;
 
-        setPhotos(savedPhotos || []);
-        setRecordings(savedRecs || []);
+        setPhotos((savedPhotos || []).filter((photo: CapturedPhoto) => !purgedIds.has(photo.id)));
+        setRecordings((savedRecs || []).filter((recording: RecordedAudio) => !purgedIds.has(recording.id)));
         setTimetables(savedTimetables || []);
       } catch (e) {
         console.error('Failed to load data from IDB:', e);
@@ -181,15 +181,13 @@ export function useAppState() {
   // ── IndexedDB Auto Save ────────────────────────────────────────────────
   useEffect(() => {
     if (!isDataLoaded) return;
-    const photosKey = user ? `lecture_snap_photos_${user.uid}` : 'lecture_snap_photos';
-    set(photosKey, photos).catch(console.error);
-  }, [photos, isDataLoaded, user]);
+    saveMedia(uid, 'photos', photos).catch(console.error);
+  }, [photos, isDataLoaded, user, purgedIds]);
 
   useEffect(() => {
     if (!isDataLoaded) return;
-    const recsKey = user ? `lecture_snap_recordings_${user.uid}` : 'lecture_snap_recordings';
-    set(recsKey, recordings).catch(console.error);
-  }, [recordings, isDataLoaded, user]);
+    saveMedia(uid, 'recordings', recordings).catch(console.error);
+  }, [recordings, isDataLoaded, user, purgedIds]);
 
   useEffect(() => {
     if (!isDataLoaded) return;
@@ -202,7 +200,7 @@ export function useAppState() {
     // Popup notifications disabled per user request
   }, []);
 
-  // ── Camera stream lifecycle & Initial Mic Permission ───────────────────
+  // ── Camera stream lifecycle ───────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
 
@@ -236,21 +234,6 @@ export function useAppState() {
         }
         setCameraStatus('live');
 
-        // 순차적 권한 요청: 카메라 권한이 승인된 후, 마이크 권한이 아직 요청되지 않은 경우 마이크 권한 요청
-        const micPerm = localStorage.getItem('lecture_bag_mic_permission');
-        if (!micPerm && navigator.mediaDevices?.getUserMedia) {
-          setTimeout(async () => {
-            try {
-              const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              audioStream.getTracks().forEach((t) => t.stop());
-              localStorage.setItem('lecture_bag_mic_permission', 'granted');
-            } catch (micErr: any) {
-              if (micErr?.name === 'NotAllowedError' || micErr?.name === 'PermissionDeniedError') {
-                localStorage.setItem('lecture_bag_mic_permission', 'denied');
-              }
-            }
-          }, 300);
-        }
       } catch (err: unknown) {
         if (cancelled) return;
         const error = err as { name?: string };
@@ -287,29 +270,6 @@ export function useAppState() {
       el.play().catch(() => {});
     }
   }, []);
-
-  // ── LocalStorage persistence ───────────────────────────────────────────
-  useEffect(() => {
-    try {
-      localStorage.setItem('lecture_snap_photos', JSON.stringify(photos));
-    } catch (e) {
-      console.error(e);
-      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-        alert('기기 저장 공간이 부족합니다. 오래된 사진을 삭제해주세요.');
-      }
-    }
-  }, [photos]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('lecture_snap_recordings', JSON.stringify(recordings));
-    } catch (e) {
-      console.error(e);
-      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-        alert('기기 저장 공간이 부족합니다. 오래된 녹음 파일을 삭제해주세요.');
-      }
-    }
-  }, [recordings]);
 
   // ── Recording timer ────────────────────────────────────────────────────
   useEffect(() => {
@@ -449,16 +409,17 @@ export function useAppState() {
     setRecordingSeconds(0);
   }, [recordingSeconds, formatRecordingTime]);
 
-  const handleDeleteRecording = useCallback((id: string) => {
-    setRecordings((prev) => prev.filter((r) => r.id !== id));
-    showToast('녹음 파일이 삭제되었습니다');
-  }, [showToast]);
+  const handleDeleteRecording = useCallback(async (id: string) => {
+    const files = getSampleMediaFiles([], recordings).filter(file => file.id === id);
+    if (files.length) await moveToTrash(files);
+  }, [recordings, moveToTrash]);
 
-  const handleDeletePhoto = useCallback((id: string) => {
-    setPhotos((prev) => prev.filter((p) => p.id !== id));
-    setSelectedPhotoIds((prev) => prev.filter((i) => i !== id));
-    showToast('사진이 삭제되었습니다');
-  }, [showToast]);
+  const handleDeletePhoto = useCallback(async (id: string) => {
+    const files = getSampleMediaFiles(photos, []).filter(file => file.id === id);
+    if (files.length && await moveToTrash(files)) {
+      setSelectedPhotoIds(prev => prev.filter(item => item !== id));
+    }
+  }, [photos, moveToTrash]);
 
   const handleTakeSnapshot = useCallback(() => {
     if (isCapturing) return;
@@ -584,7 +545,6 @@ export function useAppState() {
 
   return {
     deviceType,
-    geminiApiKey, setGeminiApiKey,
     timetableImage, setTimetableImage,
     storageMode, setStorageMode,
     timetableEntries, setTimetableEntries,
@@ -592,11 +552,11 @@ export function useAppState() {
     currentDocument, setCurrentDocument,
     isFolderExplorerOpen, setIsFolderExplorerOpen,
     handleFolderButtonClick,
-    photos, setPhotos,
+    photos: photos.filter(photo => !trashedIds.has(photo.id)), setPhotos,
     selectedPhotoIds, setSelectedPhotoIds,
     handleDeletePhoto, handleTakeSnapshot,
     isCapturing, shutterFlash,
-    recordings,
+    recordings: recordings.filter(recording => !trashedIds.has(recording.id)),
     handleDeleteRecording, handleStartRecording,
     handleTogglePauseRecording, handleStopRecording,
     formatRecordingTime,

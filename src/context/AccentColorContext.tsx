@@ -1,3 +1,5 @@
+import { useAuth } from '../hooks/useAuth';
+import { accountKey } from '../utils/accountStorage';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export interface ColorPreset {
@@ -33,9 +35,15 @@ const AccentColorContext = createContext<AccentColorContextType>({
 });
 
 export const AccentColorProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  const uid = user?.uid ?? 'guest';
+  return <AccountAccentColor key={uid} uid={uid}>{children}</AccountAccentColor>;
+};
+
+const AccountAccentColor: React.FC<{ children: React.ReactNode; uid: string; key?: string }> = ({ children, uid }) => {
   const [accentColor, setAccentColorState] = useState<string>(() => {
     try {
-      return localStorage.getItem('lecture_snap_accent_color') || DEFAULT_COLOR;
+      return localStorage.getItem(accountKey(uid, 'accent_color')) || DEFAULT_COLOR;
     } catch {
       return DEFAULT_COLOR;
     }
@@ -44,7 +52,7 @@ export const AccentColorProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const setAccentColor = (color: string) => {
     setAccentColorState(color);
     try {
-      localStorage.setItem('lecture_snap_accent_color', color);
+      localStorage.setItem(accountKey(uid, 'accent_color'), color);
     } catch {
       // ignore
     }

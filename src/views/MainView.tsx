@@ -9,7 +9,10 @@
  *
  * No business logic or camera stream code lives here.
  */
-import React from 'react';
+import React, { useCallback, useState } from 'react';
+import { CircleHelp } from 'lucide-react';
+import { AppTutorial, tutorialSteps } from '../components/AppTutorial';
+import { useAuth } from '../hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useAppState } from '../models/useAppState';
@@ -21,6 +24,24 @@ import { FolderExplorerModal } from '../components/FolderExplorerModal';
 
 export const MainView: React.FC = () => {
   const state = useAppState();
+  const { user } = useAuth();
+  const tourKey = `lecturebag_app_tutorial_v3:${user?.uid ?? 'guest'}`;
+  const [tourOpen, setTourOpen] = useState(() => {
+    try { return localStorage.getItem(tourKey) !== 'done'; } catch { return true; }
+  });
+  const [tourIndex, setTourIndex] = useState(0);
+  const restartTour = () => { setTourIndex(0); setTourOpen(true); };
+  const tourStep = tourOpen ? tutorialSteps[tourIndex] : undefined;
+  const audioMode = tourStep ? tourStep.chapter === 3 || tourStep.chapter === 4 : state.isAudioMode;
+  // Only the presentation changes during the guide; MediaRecorder is never started.
+  const recording = tourStep ? ['pause', 'resume', 'stop'].includes(tourStep.target) : state.isRecording;
+  const paused = tourStep ? ['resume', 'stop'].includes(tourStep.target) : state.isPaused;
+  const closeTour = useCallback((completed: boolean) => {
+    setTourOpen(false);
+    if (completed) {
+      try { localStorage.setItem(tourKey, 'done'); } catch { /* Guide remains available without storage. */ }
+    }
+  }, [tourKey]);
 
   return (
     <div className="fixed inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
@@ -46,10 +67,10 @@ export const MainView: React.FC = () => {
         flashMode={state.flashMode}
         aspectRatio={state.aspectRatio}
         isCameraMenuOpen={state.isCameraMenuOpen}
-        isAudioMode={state.isAudioMode}
-        isRecording={state.isRecording}
-        isPaused={state.isPaused}
-        recordingSeconds={state.recordingSeconds}
+        isAudioMode={audioMode}
+        isRecording={recording}
+        isPaused={paused}
+        recordingSeconds={tourStep ? 12 : state.recordingSeconds}
         formatRecordingTime={state.formatRecordingTime}
         onStartRecording={state.handleStartRecording}
         onStopRecording={state.handleStopRecording}
@@ -69,11 +90,11 @@ export const MainView: React.FC = () => {
         style={{ bottom: 'max(24px, env(safe-area-inset-bottom, 24px))' }}
       >
         <BottomNav
-          isAudioMode={state.isAudioMode}
-          isRecording={state.isRecording}
-          isPaused={state.isPaused}
-          photos={state.photos}
-          recordings={state.recordings}
+          isAudioMode={audioMode}
+          isRecording={recording}
+          isPaused={paused}
+          photos={tourStep ? [] : state.photos}
+          recordings={tourStep ? [] : state.recordings}
           onTakeSnapshot={state.handleTakeSnapshot}
           onStartRecording={state.handleStartRecording}
           onTogglePauseRecording={state.handleTogglePauseRecording}
@@ -85,35 +106,53 @@ export const MainView: React.FC = () => {
       </div>
 
       {/* ── Modals ── */}
+      {!state.isAudioMode && !state.isFolderExplorerOpen && !state.isRecentModalOpen && !state.isRecentRecordingsModalOpen && (
+        <>
+          <button
+            type="button"
+            onClick={restartTour}
+            aria-label="앱 전체 튜토리얼 다시 보기"
+            className="absolute right-4 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-neutral-900/80 text-white shadow-lg hover:bg-neutral-700"
+            style={{ bottom: 'max(128px, calc(env(safe-area-inset-bottom) + 104px))' }}
+          ><CircleHelp size={20} /></button>
+
+        </>
+      )}
+
+      {tourOpen && <AppTutorial index={tourIndex} onStepChange={setTourIndex} onClose={closeTour} />}
+
       <RecentPhotosModal
-        isOpen={state.isRecentModalOpen}
+        isOpen={tourStep ? tourStep.chapter === 2 : state.isRecentModalOpen}
         onClose={() => state.setIsRecentModalOpen(false)}
-        photos={state.photos}
+        photos={tourStep ? [] : state.photos}
         onDeletePhoto={state.handleDeletePhoto}
       />
 
       <RecentRecordingsModal
-        isOpen={state.isRecentRecordingsModalOpen}
+        isOpen={tourStep ? tourStep.chapter === 4 : state.isRecentRecordingsModalOpen}
         onClose={() => state.setIsRecentRecordingsModalOpen(false)}
-        recordings={state.recordings}
+        recordings={tourStep ? [] : state.recordings}
         onDeleteRecording={state.handleDeleteRecording}
       />
 
       <FolderExplorerModal
-        isOpen={state.isFolderExplorerOpen}
+        onDeletePhoto={state.handleDeletePhoto}
+        onDeleteRecording={state.handleDeleteRecording}
+        key={tourOpen ? 'tutorial' : 'app'}
+        tutorialStep={tourStep}
+        onReplayTutorial={restartTour}
+        isOpen={tourStep ? tourStep.chapter >= 5 : state.isFolderExplorerOpen}
         onClose={() => state.setIsFolderExplorerOpen(false)}
         currentDocument={state.currentDocument}
         onSelectDocument={(docName) => state.setCurrentDocument(docName)}
         showToast={state.showToast}
-        photos={state.photos}
-        recordings={state.recordings}
-        geminiApiKey={state.geminiApiKey}
-        setGeminiApiKey={state.setGeminiApiKey}
-        timetableImage={state.timetableImage}
+        photos={tourStep ? [] : state.photos}
+        recordings={tourStep ? [] : state.recordings}
+        timetableImage={tourStep ? null : state.timetableImage}
         setTimetableImage={state.setTimetableImage}
         storageMode={state.storageMode}
         setStorageMode={state.setStorageMode}
-        timetables={state.timetables}
+        timetables={tourStep ? [] : state.timetables}
         setTimetables={state.setTimetables}
       />
     </div>

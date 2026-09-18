@@ -97,7 +97,7 @@ export const MarkdownInlineRenderer: React.FC<{ text: string }> = ({ text }) => 
         tokens.push(
           <a
             key={`link-${keyIdx++}`}
-            href={linkMatch[2]}
+            href={/^(https?:\/\/|mailto:)/i.test(linkMatch[2]) ? linkMatch[2] : undefined}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-700 underline underline-offset-2 hover:opacity-90 font-medium transition-colors"

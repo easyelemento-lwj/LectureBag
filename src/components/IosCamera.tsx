@@ -14,6 +14,8 @@ import {
   MoreHorizontal,
   RefreshCw
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { accountKey } from '../utils/accountStorage';
 import { CapturedPhoto, FlashMode, CameraMode } from '../types';
 import { playShutterSound } from '../utils/audio';
 import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
@@ -22,10 +24,15 @@ import { RecentPhotosModal } from './RecentPhotosModal';
 const CAMERA_MODES: CameraMode[] = ['PPT/판서', '강의노트', '교재', '문서'];
 
 export const IosCamera: React.FC = () => {
+  const { user } = useAuth();
+  return user ? <IosCameraForUser key={user.uid} uid={user.uid} /> : null;
+};
+
+const IosCameraForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) => {
   // State
   const [photos, setPhotos] = useState<CapturedPhoto[]>(() => {
     try {
-      const saved = localStorage.getItem('lecture_snap_photos');
+      const saved = localStorage.getItem(accountKey(uid, 'lecture_snap_photos'));
       if (saved) {
         return JSON.parse(saved);
       }
@@ -65,7 +72,7 @@ export const IosCamera: React.FC = () => {
   // Save photos to localStorage whenever they update
   useEffect(() => {
     try {
-      localStorage.setItem('lecture_snap_photos', JSON.stringify(photos));
+      localStorage.setItem(accountKey(uid, 'lecture_snap_photos'), JSON.stringify(photos));
     } catch (e) {
       console.error('Failed to persist photos', e);
     }

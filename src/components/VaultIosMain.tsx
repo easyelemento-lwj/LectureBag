@@ -30,6 +30,8 @@ import {
   Radio,
   MoreHorizontal
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { accountKey } from '../utils/accountStorage';
 import { CapturedPhoto, FlashMode, RecordedAudio } from '../types';
 import { playShutterSound } from '../utils/audio';
 import { useAccentColor } from '../context/AccentColorContext';
@@ -38,6 +40,11 @@ import { RecentRecordingsModal } from './RecentRecordingsModal';
 import { FolderExplorerModal } from './FolderExplorerModal';
 
 export const VaultIosMain: React.FC = () => {
+  const { user } = useAuth();
+  return user ? <VaultIosMainForUser key={user.uid} uid={user.uid} /> : null;
+};
+
+const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) => {
   const { accentColor } = useAccentColor();
   // Current document selection state
   const [currentDocument, setCurrentDocument] = useState<string>('디지털 디톡스 가이드.md');
@@ -47,7 +54,7 @@ export const VaultIosMain: React.FC = () => {
   // Photos state from LocalStorage
   const [photos, setPhotos] = useState<CapturedPhoto[]>(() => {
     try {
-      const saved = localStorage.getItem('lecture_snap_photos');
+      const saved = localStorage.getItem(accountKey(uid, 'lecture_snap_photos'));
       if (saved) {
         const parsed: CapturedPhoto[] = JSON.parse(saved);
         // Clean up dataUrl if it was generated with old watermark canvas
@@ -78,7 +85,7 @@ export const VaultIosMain: React.FC = () => {
   // Audio Recordings state from LocalStorage
   const [recordings, setRecordings] = useState<RecordedAudio[]>(() => {
     try {
-      const saved = localStorage.getItem('lecture_snap_recordings');
+      const saved = localStorage.getItem(accountKey(uid, 'lecture_snap_recordings'));
       if (saved) {
         const parsed: RecordedAudio[] = JSON.parse(saved);
         return parsed.filter(
@@ -228,7 +235,7 @@ export const VaultIosMain: React.FC = () => {
   // Sync LocalStorage Recordings with Error Handling
   useEffect(() => {
     try {
-      localStorage.setItem('lecture_snap_recordings', JSON.stringify(recordings));
+      localStorage.setItem(accountKey(uid, 'lecture_snap_recordings'), JSON.stringify(recordings));
     } catch (e) {
       console.error('Failed to save recordings to localStorage:', e);
       if (e instanceof DOMException && e.name === 'QuotaExceededError') {
@@ -313,7 +320,7 @@ export const VaultIosMain: React.FC = () => {
   // Sync LocalStorage Photos with Error Handling
   useEffect(() => {
     try {
-      localStorage.setItem('lecture_snap_photos', JSON.stringify(photos));
+      localStorage.setItem(accountKey(uid, 'lecture_snap_photos'), JSON.stringify(photos));
     } catch (e) {
       console.error('Failed to save photos to localStorage:', e);
       if (e instanceof DOMException && e.name === 'QuotaExceededError') {
@@ -838,6 +845,8 @@ export const VaultIosMain: React.FC = () => {
 
       {/* Folder Explorer Modal */}
       <FolderExplorerModal
+        onDeletePhoto={handleDeletePhoto}
+        onDeleteRecording={handleDeleteRecording}
         isOpen={isFolderExplorerOpen}
         onClose={() => setIsFolderExplorerOpen(false)}
         currentDocument={currentDocument}
@@ -845,8 +854,6 @@ export const VaultIosMain: React.FC = () => {
         showToast={showToast}
         photos={photos}
         recordings={recordings}
-        geminiApiKey=""
-        setGeminiApiKey={() => {}}
         timetableImage={null}
         setTimetableImage={() => {}}
         storageMode="default"

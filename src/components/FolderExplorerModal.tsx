@@ -42,14 +42,19 @@ import {
 import { CapturedPhoto, MediaFile, RecordedAudio, TimetableEntry, SemesterTimetable } from '../types';
 import { getFolderHierarchyFromDate, getSampleMediaFiles, extractSmartFileDate } from '../utils/dateFolders';
 
+import { trashExpiresAt } from '../utils/trash';
+import { accountKey, documentKey } from '../utils/accountStorage';
+import { useTrash } from '../context/TrashContext';
 import { useAccentColor } from '../context/AccentColorContext';
 import { analyzeTimetableImage, generateAiSummary } from '../utils/gemini';
 import { MarkdownViewer } from './MarkdownViewer';
 import { useAuth } from '../hooks/useAuth';
+import type { TutorialStep } from './AppTutorial';
+import { tutorialFiles } from './tutorialFixtures';
 
-export const getPersistedAiDocs = (): MediaFile[] => {
+export const getPersistedAiDocs = (uid: string): MediaFile[] => {
   try {
-    const saved = localStorage.getItem('lecture_snap_ai_docs');
+    const saved = localStorage.getItem(accountKey(uid, 'ai_docs'));
     if (saved) {
       const parsed: MediaFile[] = JSON.parse(saved);
       if (Array.isArray(parsed)) {
@@ -58,9 +63,7 @@ export const getPersistedAiDocs = (): MediaFile[] => {
           (d) => d.id !== 'ai_doc_sample_1' && !d.name.includes('컴퓨터구조_12주차_핵심요약')
         );
         if (realDocs.length !== parsed.length) {
-          localStorage.setItem('lecture_snap_ai_docs', JSON.stringify(realDocs));
-          localStorage.removeItem('doc_sample_1');
-          localStorage.removeItem('ai_doc_sample_1');
+          localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(realDocs));
         }
         return realDocs.map((d) => ({
           ...d,
@@ -75,6 +78,10 @@ export const getPersistedAiDocs = (): MediaFile[] => {
 };
 
 interface FolderExplorerModalProps {
+  tutorialStep?: TutorialStep;
+  onReplayTutorial?: () => void;
+  onDeletePhoto: (id: string) => void;
+  onDeleteRecording: (id: string) => void;
   isOpen: boolean;
   onClose: () => void;
   currentDocument: string;
@@ -82,8 +89,6 @@ interface FolderExplorerModalProps {
   showToast: (msg: string) => void;
   photos?: CapturedPhoto[];
   recordings?: RecordedAudio[];
-  geminiApiKey: string;
-  setGeminiApiKey: React.Dispatch<React.SetStateAction<string>>;
   timetableImage: string | null;
   setTimetableImage: React.Dispatch<React.SetStateAction<string | null>>;
   storageMode: 'default' | 'timetable';
@@ -415,6 +420,7 @@ const HoldableFolderCard: React.FC<HoldableFolderCardProps> = ({
 
   return (
     <div
+      data-tour="folder-item"
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         handleStart(e.clientX, e.clientY);
@@ -439,6 +445,7 @@ const HoldableFolderCard: React.FC<HoldableFolderCardProps> = ({
 
 // Helper component for File items (Photos/Audio) where click selects in selection mode, or normal action otherwise, and hold enters/toggles selection mode
 interface HoldableFileCardProps {
+  tourId?: string;
   isSelectionMode: boolean;
   onSelect: () => void;
   onClickNormal: () => void;
@@ -447,6 +454,7 @@ interface HoldableFileCardProps {
 }
 
 const HoldableFileCard: React.FC<HoldableFileCardProps> = ({
+  tourId,
   isSelectionMode,
   onSelect,
   onClickNormal,
@@ -508,6 +516,7 @@ const HoldableFileCard: React.FC<HoldableFileCardProps> = ({
 
   return (
     <div
+      data-tour={tourId ?? 'file-item'}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         handleStart(e.clientX, e.clientY);
@@ -531,6 +540,10 @@ const HoldableFileCard: React.FC<HoldableFileCardProps> = ({
 };
 
 export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
+  tutorialStep,
+  onReplayTutorial,
+  onDeletePhoto,
+  onDeleteRecording,
   isOpen,
   onClose,
   currentDocument,
@@ -538,28 +551,54 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   showToast,
   photos = [],
   recordings = [],
-  geminiApiKey,
-  setGeminiApiKey,
   timetableImage,
   setTimetableImage,
-  storageMode,
+  storageMode: savedStorageMode,
   setStorageMode,
   timetables,
   setTimetables
 }) => {
   const { user, signInWithGoogle, signOut } = useAuth();
+  const uid = user?.uid ?? 'guest';
+  const { entries: trashEntries, moveToTrash, restore, permanentlyDelete } = useTrash();
+  const [trashBusy, setTrashBusy] = useState(false);
+  const deletedEntries = tutorialStep ? [] : trashEntries.filter(entry => !entry.restored && !entry.purged);
   const { accentColor } = useAccentColor();
+  const storageMode = tutorialStep ? (tutorialStep.chapter === 8 && tutorialStep.target === 'schedule' ? 'timetable' : 'default') : savedStorageMode;
   // Folder Navigation Level Path:
   // Level 0: [] -> Root (Years list)
   // Level 1: ['2026년'] -> Half-years list
   // Level 2: ['2026년', '하반기'] -> Months list
   // Level 3: ['2026년', '하반기', '8월'] -> Days list
   // Level 4: ['2026년', '하반기', '8월', '2일 (일)'] -> List layout of files (Photos & Audio)
-  const [navPath, setNavPath] = useState<string[]>([]);
+  const [savedNavPath, setNavPath] = useState<string[]>([]);
+  const navPath = useMemo(() => {
+    if (!tutorialStep) return savedNavPath;
+    if (tutorialStep.chapter !== 6) return [];
+    const h = getFolderHierarchyFromDate(tutorialFiles[0].timestamp);
+    const path = [h.year, h.halfYear, h.month, h.day];
+    return tutorialStep.target === 'hold' ? path.slice(0, 3) : path;
+  }, [tutorialStep, savedNavPath]);
   const [isPathExpanded, setIsPathExpanded] = useState<boolean>(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<boolean>(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [activeSettingDetail, setActiveSettingDetail] = useState<'profile' | 'timetable' | 'ai_center' | 'ai_process' | 'settings' | 'about' | null>(null);
+  const [savedIsSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [savedActiveSettingDetail, setActiveSettingDetail] = useState<'profile' | 'timetable' | 'ai_center' | 'ai_process' | 'trash' | 'settings' | 'about' | null>(null);
+
+
+  const isSettingsOpen = tutorialStep ? tutorialStep.chapter >= 7 : savedIsSettingsOpen;
+  const activeSettingDetail = tutorialStep ? (tutorialStep.chapter === 8 ? 'timetable' : tutorialStep.chapter === 9 ? 'ai_center' : null) : savedActiveSettingDetail;
+
+  const [timetableNotice, setTimetableNotice] = useState<{ message: string } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setTimetableNotice(null);
+      return;
+    }
+    if (!timetableNotice) return;
+    const timeout = window.setTimeout(() => setTimetableNotice(null), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [isOpen, timetableNotice]);
 
   // Timetable upload & storage mode state
   const timetableInputRef = useRef<HTMLInputElement | null>(null);
@@ -574,11 +613,13 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const [editEndDate, setEditEndDate] = useState<string>('');
 
   // Selection Mode state
-  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
+  const [savedIsSelectionMode, setIsSelectionMode] = useState<boolean>(false);
   const [newlyUploadedIds, setNewlyUploadedIds] = useState<string[]>([]);
   const [isReorderMode, setIsReorderMode] = useState<boolean>(false);
   const [reorderEntries, setReorderEntries] = useState<Array<{ id: string; type: 'bundle' | 'single'; files: MediaFile[] }>>([]);
-  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [savedSelectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const isSelectionMode = tutorialStep ? tutorialStep.chapter === 6 && Boolean(tutorialStep.selected) : savedIsSelectionMode;
+  const selectedItemIds = tutorialStep ? tutorialFiles.slice(0, tutorialStep.selected ?? 0).map(file => file.id) : savedSelectedItemIds;
   const [isAiStartingBubbleOpen, setIsAiStartingBubbleOpen] = useState<boolean>(false);
 
   // Rename & Info Modal States for AI Documents
@@ -605,22 +646,72 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   // Actual processing happens inside startAiSummaryProcess
 
   // Dynamic media files list combining photos & audio & documents
-  const [mediaList, setMediaList] = useState<MediaFile[]>(() => [
-    ...getPersistedAiDocs(),
+  const [savedMediaList, setMediaList] = useState<MediaFile[]>(() => tutorialStep ? [] : [
+    ...getPersistedAiDocs(uid),
     ...getSampleMediaFiles(photos, recordings),
   ]);
 
-  // Sync newly captured photos & recordings into mediaList in real-time
+
+  const mediaList = useMemo(() => {
+    if (tutorialStep) return tutorialFiles;
+    const deletedIds = new Set(trashEntries.filter(entry => !entry.restored).map(entry => entry.file.id));
+    const existingIds = new Set(savedMediaList.map(file => file.id));
+    return [...savedMediaList, ...trashEntries.filter(entry => entry.restored && !existingIds.has(entry.file.id)).map(entry => entry.file)]
+      .filter(file => !deletedIds.has(file.id));
+  }, [tutorialStep, savedMediaList, trashEntries]);
+
+  const trashFiles = async (files: MediaFile[]) => {
+    if (tutorialStep || trashBusy) return false;
+    setTrashBusy(true);
+    try {
+      const saved = await moveToTrash(files);
+      if (saved) setSelectedItemIds(prev => prev.filter(id => !files.some(file => file.id === id)));
+      return saved;
+    } finally { setTrashBusy(false); }
+  };
+
+  const restoreFiles = async (ids: string[]) => {
+    if (tutorialStep || trashBusy) return;
+    setTrashBusy(true);
+    try { await restore(ids); } finally { setTrashBusy(false); }
+  };
+
+  const deleteTrashFile = async (file: MediaFile) => {
+    if (tutorialStep || trashBusy) return;
+    if (!window.confirm(`“${file.name}”을 영구 삭제하시겠습니까? 삭제 후에는 복원할 수 없습니다.`)) return;
+    setTrashBusy(true);
+    try { await permanentlyDelete([file.id]); } finally { setTrashBusy(false); }
+  };
+
   useEffect(() => {
+    if (tutorialStep) return;
+    setMediaList(prev => {
+      const purgedIds = new Set(trashEntries.filter(entry => entry.purged).map(entry => entry.file.id));
+      const remaining = prev.filter(file => !purgedIds.has(file.id));
+      const ids = new Set(remaining.map(file => file.id));
+      const missing = trashEntries.filter(entry => entry.restored && !ids.has(entry.file.id)).map(entry => entry.file);
+      return missing.length || remaining.length !== prev.length ? [...missing, ...remaining] : prev;
+    });
+  }, [trashEntries, tutorialStep]);
+
+  const sourceMediaIds = useRef(new Set(getSampleMediaFiles(photos, recordings).map(item => item.id)));
+
+  // Track source removals without removing explorer-only imports or documents.
+  // Tutorial metadata stays separate from the real media state.
+  useEffect(() => {
+    if (tutorialStep) return;
+    const incomingMedia = getSampleMediaFiles(photos, recordings);
+    const incomingIds = new Set(incomingMedia.map(item => item.id));
+    const removedIds = new Set([...sourceMediaIds.current].filter(id => !incomingIds.has(id)));
+    sourceMediaIds.current = incomingIds;
     setMediaList((prev) => {
-      const incomingMedia = getSampleMediaFiles(photos, recordings);
       const existingIds = new Set(prev.map((m) => m.id));
       const newlyAdded = incomingMedia.filter((m) => !existingIds.has(m.id));
 
-      if (newlyAdded.length === 0) return prev;
-      return [...newlyAdded, ...prev];
+      if (newlyAdded.length === 0 && removedIds.size === 0) return prev;
+      return [...newlyAdded, ...prev.filter(item => !removedIds.has(item.id))];
     });
-  }, [photos, recordings]);
+  }, [photos, recordings, tutorialStep]);
 
   const selectedFileIds = selectedItemIds.filter((id) => !id.startsWith('folder_'));
 
@@ -658,7 +749,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       const updated = prev.map((m) => (m.id === renameModalItem.id ? { ...m, name: finalName } : m));
       const aiOnly = updated.filter((item) => item.type === 'document' || item.name.endsWith('.md'));
       try {
-        localStorage.setItem('lecture_snap_ai_docs', JSON.stringify(aiOnly));
+        localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(aiOnly));
       } catch (e) {
         console.error(e);
       }
@@ -731,7 +822,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
             currentStep: `[${i + 1}/${selectedFiles.length}] ${file.name} 분석 중...`,
           } : s));
 
-          const summary = await generateAiSummary(file.dataUrl, file.name, geminiApiKey);
+          const summary = await generateAiSummary(file.dataUrl, file.name);
           
           if (cancelledSessionsRef.current.has(newSessionId)) {
             cancelledSessionsRef.current.delete(newSessionId);
@@ -747,7 +838,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         const finalSize = `${(new Blob([fullMarkdown]).size / 1024).toFixed(1)} KB`;
         
         // localStorage에 문서 저장
-        localStorage.setItem(`doc_${newSessionId}`, fullMarkdown);
+        localStorage.setItem(documentKey(uid, `ai_doc_${newSessionId}`), fullMarkdown);
 
         setAiSessions(prev => prev.map(s => s.id === newSessionId ? {
           ...s,
@@ -771,7 +862,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           const updated = [newDoc, ...prev];
           const aiOnly = updated.filter((item) => item.type === 'document' || item.name.endsWith('.md'));
           try {
-            localStorage.setItem('lecture_snap_ai_docs', JSON.stringify(aiOnly));
+            localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(aiOnly));
           } catch (e) {
             console.error(e);
           }
@@ -881,7 +972,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           setIsOcrLoading(true);
           
           try {
-            const parsedEntries = await analyzeTimetableImage(base64Str, geminiApiKey);
+            const parsedEntries = await analyzeTimetableImage(base64Str);
             
             // Set defaults based on current month
             const currentMonth = new Date().getMonth() + 1;
@@ -1038,7 +1129,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     if (adjustedDescriptions.length > 0) {
       message += ` (기간이 겹치는 기존 시간표 자동 조정: ${adjustedDescriptions.join(', ')})`;
     }
-    showToast(message);
+    setTimetableNotice({ message });
   };
 
   const handleSaveEditedTimetable = (tt: SemesterTimetable) => {
@@ -1072,7 +1163,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   // Search & Filter state
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFileFilters, setSelectedFileFilters] = useState<('photo' | 'audio' | 'document')[]>([]);
+  const [savedSelectedFileFilters, setSelectedFileFilters] = useState<('photo' | 'audio' | 'document')[]>([]);
+  const selectedFileFilters: ('photo' | 'audio' | 'document')[] = tutorialStep ? (tutorialStep.target === 'photos' ? ['photo'] : tutorialStep.target === 'audios' ? ['audio'] : []) : savedSelectedFileFilters;
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [previewPhoto, setPreviewPhoto] = useState<MediaFile | null>(null);
   const [previewDoc, setPreviewDoc] = useState<MediaFile | null>(null);
@@ -1680,6 +1772,35 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         transition={{ duration: 0.25, ease: 'easeOut' }}
         className="absolute inset-0 z-50 bg-[#F7F7F8] text-neutral-900 flex flex-col justify-between overflow-hidden font-sans select-none"
       >
+        <AnimatePresence>
+          {timetableNotice && (
+            <motion.div
+              initial={{ opacity: 0, y: -12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="absolute inset-x-4 z-[200] mx-auto flex max-w-md items-start gap-3 rounded-2xl border border-emerald-200 bg-white p-4 shadow-xl"
+              style={{ top: 'max(16px, env(safe-area-inset-top, 16px))' }}
+            >
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-neutral-900">시간표 등록 완료</p>
+                <p className="mt-1 text-xs leading-relaxed text-neutral-600">{timetableNotice.message}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTimetableNotice(null)}
+                aria-label="시간표 등록 알림 닫기"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* 1. Header Bar */}
         <div
           className="pb-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs"
@@ -1704,6 +1825,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
             <button
               onClick={handleStartImportingFile}
               className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
+              data-tour="add"
               title="외부 파일 추가"
             >
               <Plus className="w-5.5 h-5.5 stroke-[2.5]" />
@@ -1725,6 +1847,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   ? 'bg-neutral-900 text-white shadow-xs'
                   : 'bg-[#EFEFEF] hover:bg-[#E2E2E2] text-neutral-700'
               }`}
+              data-tour="search"
               title="검색"
             >
               <Search className="w-5.5 h-5.5 stroke-[2]" />
@@ -1742,6 +1865,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 }
               }}
               className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-800 active:scale-90 transition-transform shadow-2xs"
+              data-tour="apps"
               title="설정"
             >
               <svg
@@ -2029,8 +2153,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
         {/* 3. File Type Filter Bubble Bar directly below Vault Bubble */}
         <div className="px-5 pt-1.5 pb-1.5">
-          <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 rounded-2xl p-1.5 shadow-2xs flex items-center justify-between gap-1.5 text-xs">
+          <div data-tour="filters" className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 rounded-2xl p-1.5 shadow-2xs flex items-center justify-between gap-1.5 text-xs">
             <button
+              data-tour="all"
               onClick={() => setSelectedFileFilters([])}
               className={`flex-1 py-1.5 px-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
                 selectedFileFilters.length === 0
@@ -2041,6 +2166,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               <span>전체</span>
             </button>
             <button
+              data-tour="photos"
               onClick={() => toggleFileFilter('photo')}
               className={`flex-1 py-1.5 px-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
                 selectedFileFilters.includes('photo')
@@ -2052,6 +2178,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               <span>사진</span>
             </button>
             <button
+              data-tour="audios"
               onClick={() => toggleFileFilter('audio')}
               className={`flex-1 py-1.5 px-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
                 selectedFileFilters.includes('audio')
@@ -2786,6 +2913,11 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             : 'bg-white border-neutral-200/80 hover:border-neutral-300'
                         }`}
                       >
+                        {tutorialStep && isSelectionMode && (
+                          <span aria-label={isSelected ? '선택됨' : '선택 안 됨'} className={`mr-3 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${isSelected ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-300 bg-white'}`}>
+                            {isSelected && <Check className="h-3.5 w-3.5" />}
+                          </span>
+                        )}
                         {/* File Thumbnail & Details */}
                         <div className="flex items-center gap-3 overflow-hidden mr-2">
                           {/* Left Icon / Thumbnail */}
@@ -2929,6 +3061,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     ? 'AI 센터'
                     : activeSettingDetail === 'ai_process'
                     ? 'AI 프로세스 현황'
+                    : activeSettingDetail === 'trash'
+                    ? '쓰레기통'
                     : activeSettingDetail === 'settings'
                     ? '환경설정'
                     : activeSettingDetail === 'about'
@@ -2982,6 +3116,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
                       {/* 2. 시간표 등록 (Timetable Registration) */}
                       <button
+                        data-tour="timetable"
                         onClick={() => setActiveSettingDetail('timetable')}
                         className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
                       >
@@ -3001,6 +3136,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
                       {/* 3. AI 센터 (AI Center) */}
                       <button
+                        data-tour="aiCenter"
                         onClick={() => setActiveSettingDetail('ai_center')}
                         className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
                       >
@@ -3013,6 +3149,22 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             <p className="text-[11px] text-neutral-400 mt-0.5">
                               사진/음성 AI 정리 요약 및 마크다운 생성 설정
                             </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-neutral-400" />
+                      </button>
+
+                      <button
+                        onClick={() => setActiveSettingDetail('trash')}
+                        className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
+                            <Trash2 className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-neutral-900">쓰레기통</h4>
+                            <p className="text-[11px] text-neutral-400 mt-0.5">삭제한 항목 보관함</p>
                           </div>
                         </div>
                         <ChevronRight className="w-4 h-4 text-neutral-400" />
@@ -3056,6 +3208,51 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         <ChevronRight className="w-4 h-4 text-neutral-400" />
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {activeSettingDetail === 'trash' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 px-1">
+                      <p className="text-xs text-neutral-500">보관 중인 항목 {deletedEntries.length}개</p>
+                      {deletedEntries.length > 0 && <button disabled={trashBusy} onClick={() => restoreFiles(deletedEntries.map(entry => entry.file.id))}
+                        className="text-xs font-bold text-neutral-800 px-3 py-2 rounded-xl bg-white border border-neutral-200 disabled:opacity-40">전체 복원</button>}
+                    </div>
+                    <p className="px-1 text-[11px] leading-relaxed text-neutral-400">삭제한 항목은 30일 동안 보관한 뒤 영구 삭제됩니다. 앱이 닫혀 있으면 다음 실행 시 정리됩니다.</p>
+                    {deletedEntries.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-2xs px-6 py-12 flex flex-col items-center text-center">
+                        <div className="w-16 h-16 rounded-2xl bg-neutral-100 text-neutral-400 flex items-center justify-center mb-4">
+                          <Trash2 className="w-8 h-8" aria-hidden="true" />
+                        </div>
+                        <h4 className="text-sm font-bold text-neutral-900">쓰레기통이 비어 있습니다</h4>
+                        <p className="mt-2 text-xs leading-relaxed text-neutral-400">삭제한 사진, 녹음, AI 문서를 여기에서 복원할 수 있습니다.</p>
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-2xl border border-neutral-200/80 divide-y divide-neutral-100 overflow-hidden">
+                        {deletedEntries.map(entry => {
+                          const { file, deletedAt } = entry;
+                          return (
+                          <div key={file.id} className="grid grid-cols-[44px_minmax(0,1fr)] items-center gap-3 p-4 sm:grid-cols-[44px_minmax(0,1fr)_auto]">
+                            <div className="w-11 h-11 shrink-0 rounded-xl bg-neutral-100 flex items-center justify-center overflow-hidden text-neutral-500">
+                              {file.type === 'photo' && file.dataUrl ? <img src={file.dataUrl} alt="" className="w-full h-full object-cover" />
+                                : file.type === 'audio' ? <FileAudio className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-neutral-900 break-all">{file.name}</p>
+                              <p className="mt-1 text-[11px] text-neutral-400">{file.type === 'photo' ? '사진' : file.type === 'audio' ? '녹음' : 'AI 문서'} · {new Date(deletedAt).toLocaleDateString('ko-KR')} 삭제</p>
+                              <p className="mt-1 text-[11px] text-rose-500">{new Date(trashExpiresAt(entry)).toLocaleDateString('ko-KR')} 자동 삭제</p>
+                            </div>
+                            <div className="col-start-2 flex items-center gap-1.5 sm:col-start-3 sm:row-start-1">
+                            <button disabled={trashBusy} onClick={() => restoreFiles([file.id])} aria-label={`${file.name} 복원`}
+                              className="shrink-0 rounded-xl bg-neutral-100 px-3 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-200 disabled:opacity-40">복원</button>
+                            <button disabled={trashBusy} onClick={() => deleteTrashFile(file)} aria-label={`${file.name} 영구 삭제`}
+                              className="shrink-0 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-100 disabled:opacity-40">삭제</button>
+                            </div>
+                          </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3170,6 +3367,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       {/* Storage Mode Toggle Buttons inside Settings */}
                       <div className="flex items-center gap-2 pt-1">
                         <button
+                          data-tour="default"
                           onClick={() => {
                             setStorageMode('default');
                             setNavPath([]);
@@ -3184,6 +3382,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           디폴트 모드 적용
                         </button>
                         <button
+                          data-tour="schedule"
                           onClick={() => {
                             setStorageMode('timetable');
                             setNavPath([]);
@@ -3552,6 +3751,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
                           <button
                             type="button"
+                            data-tour="sessions"
                             title="프로세스 현황 보기"
                             onClick={() => setActiveSettingDetail('ai_process')}
                             className="relative w-11 h-11 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-90 text-neutral-700 transition-all flex items-center justify-center shadow-2xs"
@@ -3594,6 +3794,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               const isSelected = selectedItemIds.includes(doc.id);
                               return (
                                 <HoldableFileCard
+                                  tourId="document"
                                   key={doc.id}
                                   isSelectionMode={isSelectionMode}
                                   onSelect={() => handleFileHoldSelect(doc.id)}
@@ -3742,6 +3943,22 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 {/* Sub-view: 앱 설명 */}
                 {activeSettingDetail === 'about' && (
                   <div className="space-y-3">
+                    {onReplayTutorial && (
+                      <button
+                        type="button"
+                        onClick={onReplayTutorial}
+                        className="flex w-full items-center justify-between gap-3 rounded-2xl border border-neutral-200/80 bg-white p-4 text-left shadow-2xs transition-colors hover:bg-neutral-50 active:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-800"><Play className="h-5 w-5" /></div>
+                          <div>
+                            <h4 className="text-sm font-bold text-neutral-900">튜토리얼 다시보기</h4>
+                            <p className="mt-0.5 text-[11px] text-neutral-400">카메라부터 AI 센터까지 사용 안내를 다시 확인해요.</p>
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+                      </button>
+                    )}
                     <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-3">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
@@ -3853,10 +4070,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               {/* Main Markdown Body with MarkdownViewer */}
               <div className="p-3 sm:p-5 flex-1 overflow-hidden flex flex-col min-h-0">
                 {(() => {
-                  const docKey = previewDoc.id.replace('ai_doc_', 'doc_');
+                  const docKey = documentKey(uid, previewDoc.id);
                   const content =
                     localStorage.getItem(docKey) ||
-                    localStorage.getItem(previewDoc.id) ||
+                    trashEntries.find(entry => entry.file.id === previewDoc.id)?.documentContent ||
                     (previewDoc as any).content ||
                     '# 요약 문서 내용이 없습니다.\n\n문서의 내용을 불러올 수 없습니다.';
 
@@ -3877,23 +4094,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               {/* iOS Bottom Action Bar */}
               <div className="p-4 bg-white border-t border-neutral-200/80 flex items-center gap-3 shadow-2xs flex-shrink-0">
                 <button
-                  onClick={() => {
-                    const docKey = previewDoc.id.replace('ai_doc_', 'doc_');
-                    localStorage.removeItem(docKey);
-                    localStorage.removeItem(previewDoc.id);
-                    setMediaList((prev) => {
-                      const updated = prev.filter((item) => item.id !== previewDoc.id);
-                      const aiOnly = updated.filter((item) => item.type === 'document' || item.name.endsWith('.md'));
-                      try {
-                        localStorage.setItem('lecture_snap_ai_docs', JSON.stringify(aiOnly));
-                      } catch (e) {
-                        console.error(e);
-                      }
-                      return updated;
-                    });
-                    setPreviewDoc(null);
-                    showToast('AI 센터에서 마크다운 문서가 삭제되었습니다.');
+                  onClick={async () => {
+                    if (await trashFiles([previewDoc])) setPreviewDoc(null);
                   }}
+                  disabled={trashBusy}
                   className="flex-1 py-3 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200/80 rounded-2xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-2xs"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -3972,7 +4176,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
         {/* Multi-Selection Mode Bottom Floating Action Toolbar */}
         <AnimatePresence>
-          {(isSelectionMode || isReorderMode) && (
+          {(isSelectionMode || isReorderMode) && tutorialStep?.target !== 'file' && (
             <motion.div
               initial={{ y: 80, opacity: 0, x: '-50%' }}
               animate={{ y: 0, opacity: 1, x: '-50%' }}
@@ -3993,6 +4197,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     }
                   }}
                   className="w-14 h-14 rounded-full bg-white border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-neutral-900 hover:text-black hover:bg-neutral-50 active:scale-90 transition-all flex items-center justify-center shadow-md"
+                  data-tour="download"
                   title="다운로드"
                 >
                   <Download className="w-6 h-6 stroke-[2.2]" />
@@ -4009,6 +4214,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       }
                     }}
                     className="w-14 h-14 rounded-full bg-neutral-900 border-2 border-neutral-800 ring-2 ring-neutral-700/60 text-white hover:bg-black active:scale-90 transition-all flex items-center justify-center shadow-md"
+                    data-tour="ai"
                     title="AI 스마트 요약"
                   >
                     <Sparkles className="w-6 h-6 stroke-[2]" style={{ color: accentColor }} />
@@ -4018,6 +4224,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 {/* 2.2 순서 바꾸기 / 완료 버튼 (하위 폴더가 없는 최하위 개별 파일 폴더에서만 활성화) */}
                 {activeSettingDetail !== 'ai_center' && !hasSelectedAiDocs && (
                   <button
+                    data-tour="reorder"
                     disabled={!isReorderMode && !isTerminalFolder}
                     onClick={() => {
                       if (isReorderMode) {
@@ -4170,30 +4377,15 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
                 {/* 3. 삭제 버튼 */}
                 <button
-                  onClick={() => {
+                  disabled={trashBusy}
+                  onClick={async () => {
+                    if (tutorialStep) return;
                     const isAiCenter = activeSettingDetail === 'ai_center';
                     const targetItems = isAiCenter ? selectedAiDocs : selectedExplorerFiles;
                     if (targetItems.length === 0) {
                       showToast('선택된 항목이 없습니다.');
                     } else {
-                      const targetIds = targetItems.map((item) => item.id);
-                      targetIds.forEach((id) => {
-                        const docKey = id.replace('ai_doc_', 'doc_');
-                        localStorage.removeItem(docKey);
-                        localStorage.removeItem(id);
-                      });
-                      setMediaList((prev) => {
-                        const updated = prev.filter((item) => !targetIds.includes(item.id));
-                        const aiOnly = updated.filter((item) => item.type === 'document' || item.name.endsWith('.md'));
-                        try {
-                          localStorage.setItem('lecture_snap_ai_docs', JSON.stringify(aiOnly));
-                        } catch (e) {
-                          console.error(e);
-                        }
-                        return updated;
-                      });
-                      setSelectedItemIds((prev) => prev.filter((id) => !targetIds.includes(id)));
-                      showToast(`${targetIds.length}개 항목이 삭제되었습니다.`);
+                      await trashFiles(targetItems);
                     }
                   }}
                   className="w-14 h-14 rounded-full bg-rose-50 border-2 border-rose-200 ring-2 ring-rose-200/60 text-rose-500 hover:bg-rose-100 active:scale-90 transition-all flex items-center justify-center shadow-md"

@@ -54,6 +54,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={onOpenRecentRecordings}
           className={`w-14 h-14 relative ${btnBase}`}
+          data-tour="recordings"
           title="최근 녹음 파일"
         >
           <Volume2 className="w-6 h-6 stroke-[2]" />
@@ -68,6 +69,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={onTogglePauseRecording}
           className="w-14 h-14 rounded-full bg-white text-[#333333] flex items-center justify-center active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 hover:bg-neutral-100 shadow-md"
+          data-tour={isPaused ? 'resume' : 'pause'}
           title={isPaused ? '녹음 재개' : '녹음 일시정지'}
         >
           {isPaused ? (
@@ -81,6 +83,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={onStopRecording}
           className="w-14 h-14 rounded-full bg-white text-[#333333] flex items-center justify-center shadow-md active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 hover:bg-neutral-100"
+          data-tour="stop"
           title="녹음 완전 정지 및 저장"
         >
           <Square className="w-6 h-6 fill-transparent stroke-[2]" />
@@ -90,6 +93,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={onOpenFolder}
           className={`w-14 h-14 ${btnBase}`}
+          data-tour="folder"
           title="폴더 탐색기"
         >
           <Folder className="w-6 h-6 stroke-[2]" />
@@ -106,6 +110,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={onOpenRecentRecordings}
           className={`w-14 h-14 relative ${btnBase}`}
+          data-tour="recordings"
           title="최근 녹음 파일"
         >
           <Volume2 className="w-6 h-6 stroke-[2]" />
@@ -120,6 +125,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={onStartRecording}
           className="w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-lg active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 p-0"
+          data-tour="record"
           title="새 녹음 시작"
         >
           <div className="w-11.5 h-11.5 rounded-full border-[3px] border-[#D30000] bg-white" />
@@ -129,6 +135,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={onOpenFolder}
           className={`w-14 h-14 ${btnBase}`}
+          data-tour="folder"
           title="폴더 탐색기"
         >
           <Folder className="w-6 h-6 stroke-[2]" />
@@ -144,6 +151,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       <button
         onClick={onOpenRecentPhotos}
         className={`w-14 h-14 relative ${btnBase}`}
+        data-tour="photo"
         title="최근 찍은 사진"
       >
         <Image className="w-6 h-6 stroke-[2]" />
@@ -156,6 +164,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
       {/* Shutter */}
       <button
+        data-tour="capture"
         onClick={onTakeSnapshot}
         className="w-16 h-16 rounded-full bg-black text-white flex items-center justify-center shadow-lg active:scale-90 transition-all border-2 border-white ring-2 ring-neutral-200/60 p-0"
         title="카메라 촬영"
@@ -167,6 +176,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       <button
         onClick={onOpenFolder}
         className={`w-14 h-14 ${btnBase}`}
+        data-tour="folder"
         title="폴더 탐색기"
       >
         <Folder className="w-6 h-6 stroke-[2]" />

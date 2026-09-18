@@ -85,6 +85,7 @@ export const RecentPhotosModal: React.FC<RecentPhotosModalProps> = ({
           <button
             onClick={onClose}
             className="w-11 h-11 rounded-full bg-neutral-800/80 border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all shadow-2xs"
+            data-tour="back"
             title="카메라 모드로 돌아가기"
           >
             <Camera className="w-5.5 h-5.5" />

@@ -72,6 +72,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
         <button
           onClick={onStartRecording}
           className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-white w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-lg"
+          data-tour="audio"
           title="음성 녹음 시작"
         >
           <Mic className="w-5.5 h-5.5 text-[#D30000]" />

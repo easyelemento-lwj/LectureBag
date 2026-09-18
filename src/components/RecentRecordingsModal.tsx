@@ -236,6 +236,7 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
           <button
             onClick={handleBackButtonClick}
             className="w-11 h-11 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center text-white hover:bg-neutral-800 active:scale-90 transition-all shadow-2xs"
+            data-tour="back"
             title={isSelectMode ? '선택 해제' : '돌아가기'}
           >
             <ChevronLeft className="w-5.5 h-5.5" />

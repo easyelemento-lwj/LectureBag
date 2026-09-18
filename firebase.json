@@ -19,6 +19,34 @@
           {
             "key": "Cache-Control",
             "value": "no-cache, no-store, must-revalidate, max-age=0"
+          },
+          {
+            "key": "Content-Security-Policy-Report-Only",
+            "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://*.googleusercontent.com; media-src 'self' data: blob:; connect-src 'self' https://lecturebag-production.up.railway.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.firebaseapp.com; frame-src https://lecturebag.firebaseapp.com https://accounts.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+          },
+          {
+            "key": "Content-Security-Policy",
+            "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+          },
+          {
+            "key": "X-Frame-Options",
+            "value": "DENY"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "strict-origin-when-cross-origin"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "camera=(self), microphone=(self), geolocation=()"
+          },
+          {
+            "key": "Cross-Origin-Opener-Policy",
+            "value": "same-origin-allow-popups"
           }
         ]
       },
