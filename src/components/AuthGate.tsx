@@ -19,7 +19,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-neutral-50 text-neutral-900">
+      <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-neutral-50 text-neutral-900">
         <img src="/lecturebag-logo.png" alt="" width={64} height={64} className="h-16 w-16 shrink-0 rounded-2xl object-contain" />
         <p className="text-xl font-bold tracking-tight">LectureBag</p>
         <div role="status" className="flex items-center gap-2 text-xs font-medium text-neutral-500">
@@ -47,7 +47,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
   return (
     <main
-      className="fixed inset-0 z-50 overflow-y-auto bg-neutral-50 px-4 text-neutral-900 sm:px-8 lg:px-12"
+      className="absolute inset-0 z-50 overflow-y-auto bg-neutral-50 px-4 text-neutral-900 sm:px-8 lg:px-12"
       style={{ paddingTop: 'max(clamp(20px, 4dvh, 48px), env(safe-area-inset-top))', paddingBottom: 'max(20px, env(safe-area-inset-bottom))', paddingLeft: 'max(clamp(16px, 4vw, 48px), env(safe-area-inset-left))', paddingRight: 'max(clamp(16px, 4vw, 48px), env(safe-area-inset-right))' }}
     >
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col md:max-w-xl lg:max-w-5xl">

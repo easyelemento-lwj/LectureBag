@@ -49,7 +49,7 @@ import { useAccentColor } from '../context/AccentColorContext';
 import { analyzeTimetableImage, generateAiSummary } from '../utils/gemini';
 import { MarkdownViewer } from './MarkdownViewer';
 import { useAuth } from '../hooks/useAuth';
-import type { TutorialStep } from './AppTutorial';
+import type { TutorialStep, TutorialSection } from './AppTutorial';
 import { tutorialFiles } from './tutorialFixtures';
 
 export const getPersistedAiDocs = (uid: string): MediaFile[] => {
@@ -79,7 +79,8 @@ export const getPersistedAiDocs = (uid: string): MediaFile[] => {
 
 interface FolderExplorerModalProps {
   tutorialStep?: TutorialStep;
-  onReplayTutorial?: () => void;
+  onReplayTutorial?: (section: TutorialSection) => void;
+  onEnterAppCenter?: () => void;
   onDeletePhoto: (id: string) => void;
   onDeleteRecording: (id: string) => void;
   isOpen: boolean;
@@ -542,6 +543,7 @@ const HoldableFileCard: React.FC<HoldableFileCardProps> = ({
 export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   tutorialStep,
   onReplayTutorial,
+  onEnterAppCenter,
   onDeletePhoto,
   onDeleteRecording,
   isOpen,
@@ -581,10 +583,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   }, [tutorialStep, savedNavPath]);
   const [isPathExpanded, setIsPathExpanded] = useState<boolean>(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<boolean>(false);
+  const [isTutorialPickerOpen, setIsTutorialPickerOpen] = useState(false);
   const [savedIsSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [savedActiveSettingDetail, setActiveSettingDetail] = useState<'profile' | 'timetable' | 'ai_center' | 'ai_process' | 'trash' | 'settings' | 'about' | null>(null);
 
 
+  useEffect(() => {
+    if (isOpen && savedIsSettingsOpen && !tutorialStep) onEnterAppCenter?.();
+  }, [isOpen, savedIsSettingsOpen, tutorialStep, onEnterAppCenter]);
   const isSettingsOpen = tutorialStep ? tutorialStep.chapter >= 7 : savedIsSettingsOpen;
   const activeSettingDetail = tutorialStep ? (tutorialStep.chapter === 8 ? 'timetable' : tutorialStep.chapter === 9 ? 'ai_center' : null) : savedActiveSettingDetail;
 
@@ -646,7 +652,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   // Actual processing happens inside startAiSummaryProcess
 
   // Dynamic media files list combining photos & audio & documents
-  const [savedMediaList, setMediaList] = useState<MediaFile[]>(() => tutorialStep ? [] : [
+  const [savedMediaList, setMediaList] = useState<MediaFile[]>(() => [
     ...getPersistedAiDocs(uid),
     ...getSampleMediaFiles(photos, recordings),
   ]);
@@ -3278,17 +3284,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           </div>
                         </div>
 
-                        <div className="border-t border-neutral-100 pt-3 space-y-2 text-xs">
-                          <div className="flex justify-between text-neutral-600">
-                            <span>계정 식별자(UID)</span>
-                            <span className="font-mono text-[10px] text-neutral-400 truncate max-w-[150px]">{user.uid}</span>
-                          </div>
-                          <div className="flex justify-between text-neutral-600">
-                            <span>자동 동기화</span>
-                            <span className="font-semibold text-emerald-600">클라우드 대기중</span>
-                          </div>
-                        </div>
-
                         <div className="pt-2">
                           <button
                             onClick={async () => {
@@ -3954,20 +3949,46 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 {activeSettingDetail === 'about' && (
                   <div className="space-y-3">
                     {onReplayTutorial && (
+                      <div className="space-y-2">
                       <button
                         type="button"
-                        onClick={onReplayTutorial}
+                        onClick={() => setIsTutorialPickerOpen(open => !open)}
+                        aria-expanded={isTutorialPickerOpen}
+                        aria-controls="tutorial-section-picker"
                         className="flex w-full items-center justify-between gap-3 rounded-2xl border border-neutral-200/80 bg-white p-4 text-left shadow-2xs transition-colors hover:bg-neutral-50 active:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
                       >
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-800"><Play className="h-5 w-5" /></div>
                           <div>
                             <h4 className="text-sm font-bold text-neutral-900">튜토리얼 다시보기</h4>
-                            <p className="mt-0.5 text-[11px] text-neutral-400">카메라부터 AI 센터까지 사용 안내를 다시 확인해요.</p>
+                            <p className="mt-0.5 text-[11px] text-neutral-400">다시 보고 싶은 안내를 선택해요.</p>
                           </div>
                         </div>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+                        <ChevronDown className={`h-4 w-4 shrink-0 text-neutral-400 transition-transform ${isTutorialPickerOpen ? 'rotate-180' : ''}`} />
                       </button>
+                      {isTutorialPickerOpen && (
+                        <div id="tutorial-section-picker" role="group" aria-label="다시 볼 튜토리얼 선택" className="grid gap-2 rounded-2xl border border-neutral-200 bg-white p-2">
+                          {([
+                            { section: 'camera', title: '카메라·녹음', description: '촬영과 녹음 화면을 살펴봐요.' },
+                            { section: 'explorer', title: '파일 탐색기', description: '파일 찾기, 선택과 활용 방법을 알아봐요.' },
+                            { section: 'apps', title: '앱 센터', description: '시간표 등록과 AI 센터를 살펴봐요.' },
+                          ] satisfies { section: TutorialSection; title: string; description: string }[]).map(item => (
+                            <button
+                              key={item.section}
+                              type="button"
+                              onClick={() => {
+                                setIsTutorialPickerOpen(false);
+                                onReplayTutorial(item.section);
+                              }}
+                              className="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-neutral-900"
+                            >
+                              <span><span className="block text-sm font-bold text-neutral-900">{item.title}</span><span className="mt-1 block text-xs text-neutral-500">{item.description}</span></span>
+                              <Play className="h-4 w-4 shrink-0 text-neutral-500" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      </div>
                     )}
                     <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-3">
                       <div className="flex items-center gap-3">

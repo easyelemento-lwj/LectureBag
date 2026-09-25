@@ -74,9 +74,17 @@ export const tutorialSteps: TutorialStep[] = [
   },
 ];
 
+export type TutorialSection = 'camera' | 'explorer' | 'apps';
+export const tutorialSections: Record<TutorialSection, TutorialStep[]> = {
+  camera: tutorialSteps.filter(s => s.chapter < 5 && s.target !== 'folder'),
+  explorer: tutorialSteps.filter(s => (s.chapter === 5 || s.chapter === 6) && s.target !== 'apps'),
+  apps: tutorialSteps.filter(s => s.chapter >= 7),
+};
+
 /** The modal blocks real actions while the app presents each tutorial page. */
-export function AppTutorial({ index, onStepChange, onClose }: {
+export function AppTutorial({ index, steps = tutorialSteps, onStepChange, onClose }: {
   index: number;
+  steps?: TutorialStep[];
   onStepChange: (index: number) => void;
   onClose: (completed: boolean) => void;
 }) {
@@ -86,10 +94,10 @@ export function AppTutorial({ index, onStepChange, onClose }: {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [geometry, setGeometry] = useState<{ left: number; top: number; width: number; height: number; viewportWidth: number; viewportHeight: number; cardHeight: number } | null>(null);
   const [highlights, setHighlights] = useState<{ left: number; top: number; width: number; height: number; label: string }[]>([]);
-  const current = tutorialSteps[index];
+  const current = steps[index];
   const Icon = current.controls.find(control => control.id === current.target)!.icon;
   const targetId = current.target === 'hold' || current.target === 'child' ? 'folder-item' : current.target === 'file' ? 'file-item' : current.target;
-  const next = () => index === tutorialSteps.length - 1 ? onClose(true) : onStepChange(index + 1);
+  const next = () => index === steps.length - 1 ? onClose(true) : onStepChange(index + 1);
   useEffect(() => {
     const dialog = dialogRef.current;
     const previous = document.activeElement as HTMLElement | null;
@@ -164,7 +172,7 @@ export function AppTutorial({ index, onStepChange, onClose }: {
   const top = current.items && overviewHeight !== undefined ? overviewTop + Math.max(0, (overviewHeight - height) / 2) : geometry ? (beside ? Math.max(16, Math.min(geometry.top + geometry.height / 2 - height / 2, geometry.viewportHeight - height - 16)) : above ? Math.max(16, geometry.top - height - 24) : geometry.top + geometry.height + 24) : undefined;
   const arrowLeft = geometry ? Math.max(24, Math.min(width - 24, geometry.left + geometry.width / 2 - left)) : width / 2;
   const arrowTop = geometry ? Math.max(24, Math.min(height - 24, geometry.top + geometry.height / 2 - top!)) : 24;
-  const nextChapter = tutorialSteps[index + 1]?.chapter !== current.chapter;
+  const nextChapter = steps[index + 1]?.chapter !== current.chapter;
   return (
     <dialog ref={dialogRef} onCancel={() => onClose(false)} aria-labelledby="app-tour-title" aria-describedby="app-tour-description" className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none overflow-hidden border-0 bg-transparent p-0 text-neutral-900 backdrop:bg-transparent">
       {current.items && highlights.length > 0 ? <svg aria-hidden="true" className="pointer-events-none fixed inset-0 h-full w-full">
@@ -196,7 +204,7 @@ export function AppTutorial({ index, onStepChange, onClose }: {
           <div className={`flex shrink-0 items-center justify-between gap-2 border-t border-neutral-200/80 ${cramped ? 'mt-2 pt-2' : compact ? 'mt-3 pt-3' : 'mt-6 pt-5'}`}>
             <button type="button" disabled={index === 0} onClick={() => onStepChange(index - 1)} className="flex min-h-11 items-center gap-1 text-xs text-neutral-500 disabled:opacity-30"><ArrowLeft size={14} />이전</button>
             {cramped && <button type="button" onClick={() => onClose(false)} aria-label="튜토리얼 닫기" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-300"><X size={16} /></button>}
-            <button type="button" onClick={next} className="flex items-center gap-2 rounded-full bg-neutral-900 px-4 py-3 text-sm font-semibold text-white hover:bg-neutral-700">{index === tutorialSteps.length - 1 ? '시작하기' : nextChapter && !['folder', 'apps'].includes(current.target) ? '다음 화면' : '다음'}<ArrowRight size={16} /></button>
+            <button type="button" onClick={next} className="flex items-center gap-2 rounded-full bg-neutral-900 px-4 py-3 text-sm font-semibold text-white hover:bg-neutral-700">{index === steps.length - 1 ? '시작하기' : nextChapter && !['folder', 'apps'].includes(current.target) ? '다음 화면' : '다음'}<ArrowRight size={16} /></button>
           </div>
         </section>
         {geometry && !current.items && <div aria-hidden="true" className="pointer-events-none absolute h-4 w-4 rotate-45 bg-[#fafafa]" style={beside ? { top: arrowTop - 8, ...(right ? { left: -8 } : { right: -8 }) } : { left: arrowLeft - 8, ...(above ? { bottom: -8 } : { top: -8 }) }} />}

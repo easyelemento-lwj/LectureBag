@@ -9,9 +9,8 @@
  *
  * No business logic or camera stream code lives here.
  */
-import React, { useCallback, useState } from 'react';
-import { CircleHelp } from 'lucide-react';
-import { AppTutorial, tutorialSteps } from '../components/AppTutorial';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AppTutorial, tutorialSections, type TutorialSection } from '../components/AppTutorial';
 import { useAuth } from '../hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -25,26 +24,45 @@ import { FolderExplorerModal } from '../components/FolderExplorerModal';
 export const MainView: React.FC = () => {
   const state = useAppState();
   const { user } = useAuth();
-  const tourKey = `lecturebag_app_tutorial_v3:${user?.uid ?? 'guest'}`;
-  const [tourOpen, setTourOpen] = useState(() => {
-    try { return localStorage.getItem(tourKey) !== 'done'; } catch { return true; }
-  });
+  const tourOwner = user?.uid ?? 'guest';
+  const seenTours = useRef(new Set<TutorialSection>());
+  const hasSeenTour = useCallback((section: TutorialSection) => {
+    if (seenTours.current.has(section)) return true;
+    try {
+      return localStorage.getItem(`lecturebag_app_tutorial_v4:${tourOwner}:${section}`) === 'seen'
+        || localStorage.getItem(`lecturebag_app_tutorial_v3:${tourOwner}`) === 'done';
+    } catch { return false; }
+  }, [tourOwner]);
+  const [tourSection, setTourSection] = useState<TutorialSection>('camera');
+  const [tourOpen, setTourOpen] = useState(() => !hasSeenTour('camera'));
   const [tourIndex, setTourIndex] = useState(0);
-  const restartTour = () => { setTourIndex(0); setTourOpen(true); };
-  const tourStep = tourOpen ? tutorialSteps[tourIndex] : undefined;
+  const startTour = useCallback((section: TutorialSection, replay = false) => {
+    if (!replay && hasSeenTour(section)) return;
+    seenTours.current.add(section);
+    try { localStorage.setItem(`lecturebag_app_tutorial_v4:${tourOwner}:${section}`, 'seen'); } catch { /* Keep the session marker. */ }
+    setTourSection(section);
+    setTourIndex(0);
+    setTourOpen(true);
+  }, [hasSeenTour, tourOwner]);
+  useEffect(() => {
+    if (!tourOpen) return;
+    seenTours.current.add(tourSection);
+    try { localStorage.setItem(`lecturebag_app_tutorial_v4:${tourOwner}:${tourSection}`, 'seen'); } catch { /* Keep the session marker. */ }
+  }, [tourOpen, tourSection, tourOwner]);
+  useEffect(() => {
+    if (state.isFolderExplorerOpen && !tourOpen) startTour('explorer');
+  }, [state.isFolderExplorerOpen, tourOpen, startTour]);
+  const enterAppCenter = useCallback(() => startTour('apps'), [startTour]);
+  const tourSteps = tutorialSections[tourSection];
+  const tourStep = tourOpen ? tourSteps[tourIndex] : undefined;
   const audioMode = tourStep ? tourStep.chapter === 3 || tourStep.chapter === 4 : state.isAudioMode;
   // Only the presentation changes during the guide; MediaRecorder is never started.
   const recording = tourStep ? ['pause', 'resume', 'stop'].includes(tourStep.target) : state.isRecording;
   const paused = tourStep ? ['resume', 'stop'].includes(tourStep.target) : state.isPaused;
-  const closeTour = useCallback((completed: boolean) => {
-    setTourOpen(false);
-    if (completed) {
-      try { localStorage.setItem(tourKey, 'done'); } catch { /* Guide remains available without storage. */ }
-    }
-  }, [tourKey]);
+  const closeTour = useCallback(() => setTourOpen(false), []);
 
   return (
-    <div className="fixed inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
+    <div className="absolute inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
 
       {/* Global Shutter Flash Animation */}
       <AnimatePresence>
@@ -93,8 +111,8 @@ export const MainView: React.FC = () => {
           isAudioMode={audioMode}
           isRecording={recording}
           isPaused={paused}
-          photos={tourStep ? [] : state.photos}
-          recordings={tourStep ? [] : state.recordings}
+          photos={state.photos}
+          recordings={state.recordings}
           onTakeSnapshot={state.handleTakeSnapshot}
           onStartRecording={state.handleStartRecording}
           onTogglePauseRecording={state.handleTogglePauseRecording}
@@ -106,53 +124,40 @@ export const MainView: React.FC = () => {
       </div>
 
       {/* ── Modals ── */}
-      {!state.isAudioMode && !state.isFolderExplorerOpen && !state.isRecentModalOpen && !state.isRecentRecordingsModalOpen && (
-        <>
-          <button
-            type="button"
-            onClick={restartTour}
-            aria-label="앱 전체 튜토리얼 다시 보기"
-            className="absolute right-4 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-neutral-900/80 text-white shadow-lg hover:bg-neutral-700"
-            style={{ bottom: 'max(128px, calc(env(safe-area-inset-bottom) + 104px))' }}
-          ><CircleHelp size={20} /></button>
-
-        </>
-      )}
-
-      {tourOpen && <AppTutorial index={tourIndex} onStepChange={setTourIndex} onClose={closeTour} />}
+      {tourOpen && <AppTutorial steps={tourSteps} index={tourIndex} onStepChange={setTourIndex} onClose={closeTour} />}
 
       <RecentPhotosModal
         isOpen={tourStep ? tourStep.chapter === 2 : state.isRecentModalOpen}
         onClose={() => state.setIsRecentModalOpen(false)}
-        photos={tourStep ? [] : state.photos}
+        photos={state.photos}
         onDeletePhoto={state.handleDeletePhoto}
       />
 
       <RecentRecordingsModal
         isOpen={tourStep ? tourStep.chapter === 4 : state.isRecentRecordingsModalOpen}
         onClose={() => state.setIsRecentRecordingsModalOpen(false)}
-        recordings={tourStep ? [] : state.recordings}
+        recordings={state.recordings}
         onDeleteRecording={state.handleDeleteRecording}
       />
 
       <FolderExplorerModal
         onDeletePhoto={state.handleDeletePhoto}
         onDeleteRecording={state.handleDeleteRecording}
-        key={tourOpen ? 'tutorial' : 'app'}
         tutorialStep={tourStep}
-        onReplayTutorial={restartTour}
+        onReplayTutorial={(section) => startTour(section, true)}
+        onEnterAppCenter={enterAppCenter}
         isOpen={tourStep ? tourStep.chapter >= 5 : state.isFolderExplorerOpen}
         onClose={() => state.setIsFolderExplorerOpen(false)}
         currentDocument={state.currentDocument}
         onSelectDocument={(docName) => state.setCurrentDocument(docName)}
         showToast={state.showToast}
-        photos={tourStep ? [] : state.photos}
-        recordings={tourStep ? [] : state.recordings}
-        timetableImage={tourStep ? null : state.timetableImage}
+        photos={state.photos}
+        recordings={state.recordings}
+        timetableImage={state.timetableImage}
         setTimetableImage={state.setTimetableImage}
         storageMode={state.storageMode}
         setStorageMode={state.setStorageMode}
-        timetables={tourStep ? [] : state.timetables}
+        timetables={state.timetables}
         setTimetables={state.setTimetables}
       />
     </div>

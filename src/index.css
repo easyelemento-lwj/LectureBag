@@ -6,18 +6,14 @@
   }
 
   :root {
+    --app-height: 100vh;
     font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
     background-color: #000000;
   }
   
   html, body {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
     width: 100%;
-    height: 100%;
+    height: var(--app-height);
     margin: 0;
     padding: 0;
     overflow: hidden;
@@ -31,20 +27,30 @@
     overscroll-behavior-y: none;
   }
 
+  /* Keep one viewport-sized container; percentage heights below inherit it.
+     iOS standalone can resolve 100%/small viewport heights above the home area. */
   #root {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
-    right: 0;
-    bottom: 0;
     width: 100%;
-    height: 100%;
+    height: var(--app-height);
     margin: 0;
     padding: 0;
     overflow: hidden;
     background-color: #000000;
   }
-  
+
+  @supports (height: 100dvh) {
+    :root { --app-height: 100dvh; }
+  }
+
+  /* Installed apps have no browser toolbar. Use the full viewport including
+     safe areas, and inset only controls rather than the camera background. */
+  @media (display-mode: standalone), (display-mode: fullscreen) {
+    :root { --app-height: 100vh; }
+  }
+
   body {
     font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
     letter-spacing: -0.015em;

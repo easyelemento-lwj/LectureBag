@@ -13,7 +13,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AccentColorProvider>
-        <div className="fixed inset-0 w-full h-full bg-black font-sans antialiased select-none overflow-hidden">
+        <div className="absolute inset-0 w-full h-full bg-black font-sans antialiased select-none overflow-hidden">
           <AuthGate>
             <TrashProvider><MainView /></TrashProvider>
           </AuthGate>
