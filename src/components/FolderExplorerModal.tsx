@@ -1,3 +1,4 @@
+import { StorageModeGuide } from './StorageModeGuide';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import {
@@ -3347,16 +3348,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200/60 text-xs space-y-1.5">
-                        <p className="font-bold text-neutral-900">
-                          • 현재 설정된 모드:{' '}
-                          <span className="font-extrabold text-black underline decoration-neutral-300 underline-offset-2">
-                            {storageMode === 'timetable' ? '시간표 모드 (연도 → 학기 → 과목 → 달 → 일)' : '디폴트 모드 (연도 → 상하반기 → 달 → 일)'}
-                          </span>
-                        </p>
-                        <p className="text-neutral-700 leading-relaxed font-medium">• 디폴트 모드: 연도 → 상하반기 → 달 → 일 순 자동 분류</p>
-                        <p className="text-neutral-700 leading-relaxed font-medium">• 시간표 모드: 시간표 사진을 등록하면 강의 시간에 맞게 사진 및 녹음 파일이 [연도 → 1학기/2학기 → 과목 → 달 → 일] 순의 하위 폴더로 자동 연결되어 저장됩니다.</p>
-                      </div>
+                      <StorageModeGuide mode={storageMode} />
 
                       {/* Storage Mode Toggle Buttons inside Settings */}
                       <div className="flex items-center gap-2 pt-1">
