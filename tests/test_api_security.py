@@ -19,6 +19,8 @@ def request(method, path, **kwargs):
 @pytest.fixture(autouse=True)
 def reset(monkeypatch):
     api.app.dependency_overrides.clear()
+    api._model_cooldowns.clear()
+    monkeypatch.setenv('GEMINI_FALLBACK_MODELS', '')
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key-not-real')
     yield
     api.app.dependency_overrides.clear()
@@ -171,3 +173,56 @@ def test_provider_retry_is_bounded_and_only_for_transient_errors(monkeypatch, st
     asyncio.run(run())
     assert len(calls) == expected_calls
     assert all(call == {'contents': 'test'} for call in calls)
+
+@pytest.mark.parametrize('status,expected', [(503, ['gemini-main', 'gemini-main', 'gemini-backup']), (404, ['gemini-main', 'gemini-backup']), (429, ['gemini-main']), (403, ['gemini-main']), (400, ['gemini-main'])])
+def test_failover_does_not_bypass_quota_or_permissions(monkeypatch, status, expected):
+    from types import SimpleNamespace
+    monkeypatch.setenv('GEMINI_FALLBACK_MODELS', 'gemini-backup')
+    calls = []
+    async def content(**kwargs):
+        calls.append(kwargs['model'])
+        if kwargs['model'] == 'gemini-backup': return 'ok'
+        raise api.errors.APIError(status, {'error': {'message': 'secret'}})
+    async def sleep(_): pass
+    monkeypatch.setattr(api.asyncio, 'sleep', sleep)
+    async def run():
+        coro = api.generate_with_retry(SimpleNamespace(models=SimpleNamespace(generate_content=content)), model='gemini-main')
+        if status in (503, 404): assert await coro == 'ok'
+        else:
+            with pytest.raises(api.errors.APIError): await coro
+    asyncio.run(run())
+    assert calls == expected
+
+
+def test_all_models_fail_bounded_and_cooldown(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setenv('GEMINI_FALLBACK_MODELS', 'gemini-backup,gemini-third')
+    calls = []
+    async def content(**kwargs):
+        calls.append(kwargs['model'])
+        raise api.errors.APIError(503, {'error': {'message': 'secret'}})
+    async def sleep(_): pass
+    monkeypatch.setattr(api.asyncio, 'sleep', sleep)
+    async def run():
+        with pytest.raises(api.errors.APIError):
+            await api.generate_with_retry(SimpleNamespace(models=SimpleNamespace(generate_content=content)), model='gemini-main')
+    asyncio.run(run())
+    assert calls == ['gemini-main', 'gemini-main', 'gemini-backup', 'gemini-backup']
+    assert api._model_cooldowns['gemini-main'] > api.time.monotonic()
+
+
+def test_cancelled_request_does_not_retry_provider(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    async def content(**kwargs):
+        calls.append(1)
+        raise api.errors.APIError(503, {'error': {'message': 'private'}})
+    async def disconnected(): return bool(calls)
+    async def sleep(_): pass
+    monkeypatch.setattr(api.asyncio, 'sleep', sleep)
+    async def run():
+        with pytest.raises(HTTPException) as error:
+            await api.generate_with_retry(SimpleNamespace(models=SimpleNamespace(generate_content=content)), request=SimpleNamespace(is_disconnected=disconnected))
+        assert error.value.status_code == 499
+    asyncio.run(run())
+    assert len(calls) == 1

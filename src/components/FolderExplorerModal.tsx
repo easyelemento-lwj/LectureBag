@@ -47,6 +47,7 @@ import { accountKey, documentKey } from '../utils/accountStorage';
 import { useTrash } from '../context/TrashContext';
 import { useAccentColor } from '../context/AccentColorContext';
 import { analyzeTimetableImage, generateAiSummary } from '../utils/gemini';
+import { AiJob, listJobs, saveNewJob, removeJob, runJob, jobMarkdown } from '../utils/aiJobs';
 import { MarkdownViewer } from './MarkdownViewer';
 import { useAuth } from '../hooks/useAuth';
 import type { TutorialStep, TutorialSection } from './AppTutorial';
@@ -637,20 +638,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
   // AI Processing Session State (Only active processing items remain here)
   const aiSessionRunners = useRef(new Map<string, () => Promise<void>>());
-  const cancelledSessionsRef = useRef<Set<string>>(new Set());
-  const [aiSessions, setAiSessions] = useState<Array<{
-    id: string;
-    title: string;
-    fileCount: number;
-    fileNames: string[];
-    startTime: string;
-    progress: number;
-    status: 'processing' | 'completed' | 'error';
-    currentStep: string;
-    resultFileName: string;
-    resultSize: string;
-    summarySnippet: string;
-  }>>([]);
+  const aiControllers = useRef(new Map<string, AbortController>());
+  const [aiSessions, setAiSessions] = useState<AiJob[]>([]);
 
   // Actual processing happens inside startAiSummaryProcess
 
@@ -768,138 +757,87 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     setRenameModalItem(null);
   };
 
-  const startAiSummaryProcess = () => {
-    setIsAiStartingBubbleOpen(true);
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toTimeString().slice(0, 5);
-
-    const selectedFiles = [...selectedExplorerFiles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    const firstFileName = selectedFiles[0]?.name?.replace(/\.[^/.]+$/, '') || '자료';
-    const fileNames = selectedFiles.map((f) => f.name);
-    const cleanTitle = `${firstFileName}${selectedFiles.length > 1 ? `_외_${selectedFiles.length - 1}개` : ''}`;
-    const mdFileName = `${dateStr}_${cleanTitle}_요약.md`;
-
-    const newSessionId = `session_${Date.now()}`;
-    const newSession = {
-      id: newSessionId,
-      title: `${dateStr}_${cleanTitle}`,
-      fileCount: selectedFiles.length || 1,
-      fileNames: fileNames.length > 0 ? fileNames : ['선택자료_01.jpg', '음성녹음_01.m4a'],
-      startTime: timeStr,
-      progress: 0,
-      status: 'processing' as const,
-      currentStep: '자료 스캔 및 분석 준비 중...',
-      resultFileName: mdFileName,
-      resultSize: '...',
-      summarySnippet: `# ${cleanTitle} AI 통합 요약\n- 분석 준비 중...`,
+  const registerAiJob = (job: AiJob) => {
+    const run = async () => {
+      if (aiControllers.current.has(job.id)) return;
+      const controller = new AbortController();
+      aiControllers.current.set(job.id, controller);
+      const execute = async () => {
+        // Re-read after acquiring the browser lock so another tab's checkpoints win.
+        const latest = (await listJobs(uid)).find(item => item.id === job.id);
+        if (!latest || controller.signal.aborted) return;
+        await runJob(uid, latest, {
+          signal: controller.signal,
+          summarize: generateAiSummary,
+          changed: value => setAiSessions(prev => prev.map(item => item.id === value.id ? value : item)),
+          complete: async (value, markdown) => {
+            if (controller.signal.aborted) return;
+            const doc: MediaFile = {
+              id: `ai_doc_${value.id}`, type: 'document', name: value.resultFileName,
+              fileSize: `${(new Blob([markdown]).size / 1024).toFixed(1)} KB`, timestamp: new Date(),
+              mode: 'AI 스마트 요약노트', sourceFileNames: value.fileNames,
+            };
+            localStorage.setItem(documentKey(uid, doc.id), markdown);
+            const docs = [doc, ...getPersistedAiDocs(uid).filter(item => item.id !== doc.id)];
+            localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(docs));
+            setMediaList(prev => [doc, ...prev.filter(item => item.id !== doc.id)]);
+            showToast(`🎉 [${value.resultFileName}] AI 센터에 저장되었습니다!`);
+          },
+        });
+      };
+      try {
+        if (navigator.locks) {
+          await navigator.locks.request(accountKey(uid, `ai_job:${job.id}`), { signal: controller.signal }, execute);
+        } else await execute();
+      } catch (error) {
+        if (!controller.signal.aborted) showToast(`AI 작업을 불러오지 못했습니다: ${(error as Error).message}`);
+      } finally { aiControllers.current.delete(job.id); }
     };
+    aiSessionRunners.current.set(job.id, run);
+    return run;
+  };
 
-    setAiSessions((prev) => [newSession, ...prev]);
+  useEffect(() => {
+    let active = true;
+    void listJobs(uid).then(jobs => {
+      if (!active) return;
+      const pending = jobs.map(job => ({ ...job, status: 'error' as const,
+        currentStep: `${job.files.filter(file => file.summary !== undefined).length}/${job.fileCount}개 완료 · 저장된 작업입니다. 이어서 시도하면 남은 파일을 처리합니다.` }));
+      setAiSessions(prev => [...prev, ...pending.filter(job => !prev.some(item => item.id === job.id))]);
+      pending.forEach(registerAiJob);
+    }).catch(() => { if (active) showToast('저장된 AI 작업을 불러오지 못했습니다. 기기 저장 공간을 확인해주세요.'); });
+    return () => {
+      active = false;
+      aiControllers.current.forEach(controller => controller.abort());
+      aiControllers.current.clear();
+      aiSessionRunners.current.clear();
+    };
+  }, [uid]);
 
-    setTimeout(() => {
-      setIsAiStartingBubbleOpen(false);
+  const startAiSummaryProcess = async () => {
+    const files = [...selectedExplorerFiles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    if (!files.length) return;
+    setIsAiStartingBubbleOpen(true);
+    const date = new Date();
+    const title = `${date.toISOString().slice(0, 10)}_${files[0].name.replace(/\.[^/.]+$/, '')}${files.length > 1 ? `_외_${files.length - 1}개` : ''}`;
+    const job: AiJob = {
+      id: `session_${crypto.randomUUID()}`, title, fileCount: files.length, fileNames: files.map(file => file.name),
+      startTime: date.toTimeString().slice(0, 5), progress: 0, status: 'processing', currentStep: '분석 준비 중...',
+      resultFileName: `${title}_요약.md`, resultSize: '', summarySnippet: '',
+      files: files.map(file => ({ name: file.name, dataUrl: file.dataUrl })),
+    };
+    try {
+      await saveNewJob(uid, job);
+      setAiSessions(prev => [job, ...prev]);
       setSelectedItemIds([]);
       setIsSelectionMode(false);
       setIsReorderMode(false);
-      
-      // ✨ AI 시작 직후 바로 실시간 프로세스 화면으로 이동하여 진행/오류 여부를 확인하게 함
       setIsSettingsOpen(true);
       setActiveSettingDetail('ai_process');
-      
-      showToast('⚡ AI 정리가 시작되었습니다! 실시간 진행 상황을 확인하세요.');
-    }, 1000);
-
-    // Keep successful results in this session when a later file fails.
-    let fullMarkdown = `# ${cleanTitle} 통합 분석 결과\n\n`;
-    let snippet = '';
-    let completedCount = 0;
-    let running = false;
-    const runSession = async () => {
-      if (running || cancelledSessionsRef.current.has(newSessionId)) return;
-      running = true;
-      setAiSessions(prev => prev.map(s => s.id === newSessionId ? { ...s, status: 'processing' } : s));
-      try {
-        for (let i = completedCount; i < selectedFiles.length; i++) {
-          if (cancelledSessionsRef.current.has(newSessionId)) {
-            cancelledSessionsRef.current.delete(newSessionId);
-            return;
-          }
-
-          const file = selectedFiles[i];
-          const currentProgress = Math.round(((i) / selectedFiles.length) * 100);
-          
-          setAiSessions(prev => prev.map(s => s.id === newSessionId ? {
-            ...s,
-            progress: currentProgress,
-            currentStep: `[${i + 1}/${selectedFiles.length}] ${file.name} 분석 중...`,
-          } : s));
-
-          const summary = await generateAiSummary(file.dataUrl, file.name);
-          
-          if (cancelledSessionsRef.current.has(newSessionId)) {
-            cancelledSessionsRef.current.delete(newSessionId);
-            return;
-          }
-          
-          fullMarkdown += `## ${file.name}\n\n${summary}\n\n---\n\n`;
-          completedCount = i + 1;
-          setAiSessions(prev => prev.map(s => s.id === newSessionId ? { ...s, progress: Math.round(completedCount / selectedFiles.length * 100) } : s));
-          if (i === 0) {
-            snippet = summary.substring(0, 150) + '...';
-          }
-        }
-
-        const finalSize = `${(new Blob([fullMarkdown]).size / 1024).toFixed(1)} KB`;
-        
-        // localStorage에 문서 저장
-        localStorage.setItem(documentKey(uid, `ai_doc_${newSessionId}`), fullMarkdown);
-
-        setAiSessions(prev => prev.map(s => s.id === newSessionId ? {
-          ...s,
-          progress: 100,
-          status: 'completed',
-          currentStep: 'AI 센터 인덱싱 및 저장 완료',
-          resultSize: finalSize,
-          summarySnippet: snippet,
-        } : s));
-
-        setMediaList(prev => {
-          const newDoc: MediaFile = {
-            id: `ai_doc_${newSessionId}`,
-            type: 'document',
-            name: mdFileName,
-            fileSize: finalSize,
-            timestamp: new Date(),
-            mode: 'AI 스마트 요약노트',
-            sourceFileNames: fileNames,
-          };
-          const updated = [newDoc, ...prev];
-          const aiOnly = updated.filter((item) => item.type === 'document' || item.name.endsWith('.md'));
-          try {
-            localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(aiOnly));
-          } catch (e) {
-            console.error(e);
-          }
-          return updated;
-        });
-
-        aiSessionRunners.current.delete(newSessionId);
-        showToast(`🎉 [${mdFileName}] AI 정리가 완료되어 AI 센터에 저장되었습니다!`);
-
-      } catch (err: any) {
-        setAiSessions(prev => prev.map(s => s.id === newSessionId ? {
-          ...s,
-          status: 'error',
-          currentStep: `${completedCount}/${selectedFiles.length}개 완료 · ${err.message} 이어서 시도하면 완료된 파일은 다시 처리하지 않습니다.`,
-        } : s));
-        showToast(`❌ AI 정리 중 오류가 발생했습니다: ${err.message}`);
-      } finally {
-        running = false;
-      }
-    };
-    aiSessionRunners.current.set(newSessionId, runSession);
-    void runSession();
+      void registerAiJob(job)();
+    } catch {
+      showToast('작업을 저장하지 못했습니다. 기기 저장 공간을 확인한 후 다시 시도해주세요.');
+    } finally { setIsAiStartingBubbleOpen(false); }
   };
 
   const toggleSelectItem = (id: string) => {
@@ -3911,17 +3849,27 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               key={session.id}
                               className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs space-y-3 relative overflow-hidden"
                             >
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0 flex-1 basis-full sm:basis-auto">
                                   <span className="w-2 h-2 rounded-full bg-neutral-900 shrink-0" />
                                   <h4 className="text-sm font-bold text-neutral-900 leading-snug truncate">
                                     {session.title}
                                   </h4>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span className="text-xs font-extrabold text-neutral-800 bg-neutral-100 px-2.5 py-1 rounded-full border border-neutral-200 shrink-0">
-                                    {session.status === 'error' ? '실패' : `${session.progress}%`}
+                                    {session.status === 'error' ? '중단됨' : `${session.progress}%`}
                                   </span>
+                                  {session.files.some(file => file.summary !== undefined) && (
+                                    <button type="button" className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-bold"
+                                      onClick={() => setPreviewDoc({ id: `partial_${session.id}`, type: 'document', name: `${session.title}_완료분.md`, timestamp: new Date(),
+                                        fileSize: `${(new Blob([jobMarkdown(session)]).size / 1024).toFixed(1)} KB`,
+                                        sourceFileNames: session.files.filter(file => file.summary !== undefined).map(file => file.name),
+                                        content: jobMarkdown(session),
+                                      } as MediaFile)}>
+                                      완료분 보기
+                                    </button>
+                                  )}
                                   {session.status === 'error' && (
                                     <button type="button" onClick={() => void aiSessionRunners.current.get(session.id)?.()}
                                       className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-bold text-white">
@@ -3931,7 +3879,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                   <button
                                     onClick={() => {
                                       aiSessionRunners.current.delete(session.id);
-                                      cancelledSessionsRef.current.add(session.id);
+                                      aiControllers.current.get(session.id)?.abort();
+                                      void removeJob(uid, session.id).catch(() => showToast('작업 삭제에 실패했습니다. 다시 시도해주세요.'));
                                       setAiSessions((prev) => prev.filter((s) => s.id !== session.id));
                                       showToast(`'${session.title}' AI 정리 세션이 취소되었습니다.`);
                                     }}
@@ -4149,7 +4098,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
               {/* iOS Bottom Action Bar */}
               <div className="p-4 bg-white border-t border-neutral-200/80 flex items-center gap-3 shadow-2xs flex-shrink-0">
-                <button
+                {!previewDoc.id.startsWith('partial_') && <button
                   onClick={async () => {
                     if (await trashFiles([previewDoc])) setPreviewDoc(null);
                   }}
@@ -4158,7 +4107,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>문서 삭제</span>
-                </button>
+                </button>}
 
                 <button
                   onClick={() => setPreviewDoc(null)}

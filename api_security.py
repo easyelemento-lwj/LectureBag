@@ -80,7 +80,7 @@ ACQUIRE = """
 redis.call('ZREMRANGEBYSCORE', KEYS[4], '-inf', ARGV[1])
 redis.call('ZREMRANGEBYSCORE', KEYS[5], '-inf', ARGV[1])
 for i = 1, 3 do
-  if tonumber(redis.call('GET', KEYS[i]) or '0') >= tonumber(ARGV[i+3]) then return 0 end
+  if tonumber(redis.call('GET', KEYS[i]) or '0') >= tonumber(ARGV[i+3]) then return -i end
 end
 if redis.call('ZCARD', KEYS[4]) >= tonumber(ARGV[7]) then return 0 end
 if redis.call('ZCARD', KEYS[5]) >= tonumber(ARGV[8]) then return 0 end
@@ -131,8 +131,10 @@ class AiQuota:
                 int(os.environ.get('AI_GLOBAL_CONCURRENCY', '4')))
         except Exception:
             raise HTTPException(503, 'AI 서비스를 잠시 사용할 수 없습니다.') from None
-        if not allowed:
-            raise HTTPException(429, '사용 한도에 도달했습니다. 잠시 후 다시 시도해주세요.', headers={'Retry-After': '60'})
+        if allowed != 1:
+            daily = allowed in (-2, -3)
+            delay = int(86400 - now % 86400) + 1 if daily else 60
+            raise HTTPException(429, {'code': 'AI_DAILY_QUOTA' if daily else 'AI_RATE_LIMIT'}, headers={'Retry-After': str(delay)})
         try:
             yield
         finally:
