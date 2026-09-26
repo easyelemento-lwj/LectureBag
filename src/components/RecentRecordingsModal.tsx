@@ -302,7 +302,7 @@ export const RecentRecordingsModal: React.FC<RecentRecordingsModalProps> = ({
 
         {/* Recordings List */}
         <div
-          className="flex-1 overflow-y-auto px-5 w-full max-w-2xl mx-auto divide-y divide-neutral-800/80 scrollbar-none"
+          className="flex-1 overflow-y-auto px-5 w-full min-w-0 divide-y divide-neutral-800/80 scrollbar-none"
           style={
             isSelectMode
               ? {
