@@ -42,6 +42,7 @@ import {
 import { CapturedPhoto, MediaFile, RecordedAudio, TimetableEntry, SemesterTimetable } from '../types';
 import { getFolderHierarchyFromDate, getSampleMediaFiles, extractSmartFileDate } from '../utils/dateFolders';
 
+import { saveMedia, loadImportedMedia } from '../utils/mediaStorage';
 import { trashExpiresAt } from '../utils/trash';
 import { accountKey, documentKey } from '../utils/accountStorage';
 import { useTrash } from '../context/TrashContext';
@@ -691,6 +692,19 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       return missing.length || remaining.length !== prev.length ? [...missing, ...remaining] : prev;
     });
   }, [trashEntries, tutorialStep]);
+
+  useEffect(() => {
+    let active = true;
+    void loadImportedMedia<MediaFile>(uid).then(files => {
+      if (!active) return;
+      setMediaList(prev => {
+        const ids = new Set(prev.map(file => file.id));
+        return [...prev, ...files.filter(file => !ids.has(file.id))];
+      });
+    }).catch(() => { if (active) showToast('저장된 파일을 불러오지 못했습니다. 다시 열어주세요.'); });
+    return () => { active = false; };
+  }, [uid]);
+  const importSaving = useRef(false);
 
   const sourceMediaIds = useRef(new Set(getSampleMediaFiles(photos, recordings).map(item => item.id)));
 
@@ -1577,7 +1591,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
             id: `imported_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
             type: isImage ? 'photo' : 'audio',
             name: file.name,
-            dataUrl: isImage ? dataUrl : undefined,
+            dataUrl,
             fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
             timestamp: smartDate,
             duration: isImage ? undefined : '04:15',
@@ -1659,8 +1673,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   };
 
   // Confirm save imported files (Option 2: Smart Auto Multi-Date classification + optional single date override)
-  const handleConfirmSaveToFolder = () => {
-    if (pendingImportFiles.length === 0) return;
+  const handleConfirmSaveToFolder = async () => {
+    if (pendingImportFiles.length === 0 || importSaving.current) return;
+    importSaving.current = true;
+    let successMessage = '';
 
     let newSavedFiles: MediaFile[] = [];
 
@@ -1682,7 +1698,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       }));
 
       const dateFormatted = `${targetDate.getFullYear()}년 ${targetDate.getMonth() + 1}월 ${targetDate.getDate()}일`;
-      showToast(`🎉 [${newSavedFiles.length}개 파일]이 ${dateFormatted} 폴더에 성공적으로 저장되었습니다!`);
+      successMessage = `🎉 [${newSavedFiles.length}개 파일]이 ${dateFormatted} 폴더에 저장되었습니다!`;
     } else {
       // Smart Auto Mode: Each file preserves its own detected timestamp
       newSavedFiles = pendingImportFiles.map((file, idx) => ({
@@ -1695,13 +1711,19 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         ? `${distinctDetectedDates.length}개 날짜 폴더에 각각`
         : `${distinctDetectedDates[0] || '해당 일자'} 폴더에`;
 
-      showToast(`🎉 [${newSavedFiles.length}개 파일]이 원본 촬영일 기준 ${summaryText} 자동 분류되어 저장되었습니다!`);
+      successMessage = `🎉 [${newSavedFiles.length}개 파일]이 원본 촬영일 기준 ${summaryText} 저장되었습니다!`;
     }
 
-    setMediaList((prev) => [...newSavedFiles, ...prev]);
-    setNewlyUploadedIds(newSavedFiles.map(f => f.id));
-    setPendingImportFiles([]);
-    setShowAddConfirmModal(false);
+    try {
+      await saveMedia(uid, 'imports', newSavedFiles);
+      setMediaList((prev) => [...newSavedFiles, ...prev]);
+      setNewlyUploadedIds(newSavedFiles.map(f => f.id));
+      setPendingImportFiles([]);
+      setShowAddConfirmModal(false);
+      showToast(successMessage);
+    } catch {
+      showToast('파일을 저장하지 못했습니다. 기기 저장 공간을 확인하고 다시 시도해주세요.');
+    } finally { importSaving.current = false; }
   };
 
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);

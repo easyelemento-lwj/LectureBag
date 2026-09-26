@@ -1,10 +1,10 @@
-import { createStore } from 'idb-keyval';
+import { createStore, get } from 'idb-keyval';
 import type { TrashEntry } from './trash';
 import { purgeExpiredTrash } from './trash';
 
 const store = createStore('keyval-store', 'keyval');
 export const trashKey = (uid: string) => `lecture_snap_trash_${uid}`;
-const sourceKey = (uid: string, kind: 'photos' | 'recordings') => `lecture_snap_${kind}_${uid}`;
+const sourceKey = (uid: string, kind: 'photos' | 'recordings' | 'imports') => `lecture_snap_${kind}_${uid}`;
 
 // Read and write in a single IndexedDB transaction, shared by every browser tab.
 function transaction<T>(keys: string[], change: (values: any[], objectStore: IDBObjectStore) => T): Promise<T> {
@@ -29,8 +29,8 @@ function transaction<T>(keys: string[], change: (values: any[], objectStore: IDB
 }
 
 export function updateTrash(uid: string, change: (entries: TrashEntry[]) => TrashEntry[]): Promise<TrashEntry[]> {
-  const keys = [trashKey(uid), sourceKey(uid, 'photos'), sourceKey(uid, 'recordings')];
-  return transaction(keys, ([saved = [], photos = [], recordings = []], objectStore) => {
+  const keys = [trashKey(uid), sourceKey(uid, 'photos'), sourceKey(uid, 'recordings'), sourceKey(uid, 'imports')];
+  return transaction(keys, ([saved = [], photos = [], recordings = [], imports = []], objectStore) => {
     const current = purgeExpiredTrash(saved);
     const proposed = change(current);
     const permanent = new Map<string, TrashEntry>(current.filter((entry: TrashEntry) => entry.purged).map((entry: TrashEntry) => [entry.file.id, entry]));
@@ -40,15 +40,24 @@ export function updateTrash(uid: string, change: (entries: TrashEntry[]) => Tras
     objectStore.put(next, keys[0]);
     objectStore.put(photos.filter((file: { id: string }) => !purged.has(file.id)), keys[1]);
     objectStore.put(recordings.filter((file: { id: string }) => !purged.has(file.id)), keys[2]);
+    objectStore.put(imports.filter((file: { id: string }) => !purged.has(file.id)), keys[3]);
     return next;
   });
 }
 
-export function saveMedia<T extends { id: string }>(uid: string, kind: 'photos' | 'recordings', files: T[]): Promise<void> {
+export function saveMedia<T extends { id: string }>(uid: string, kind: 'photos' | 'recordings' | 'imports', files: T[]): Promise<void> {
   const keys = [trashKey(uid), sourceKey(uid, kind)];
   return transaction(keys, ([entries = [], saved = []], objectStore) => {
     const purged = new Set(entries.filter((entry: TrashEntry) => entry.purged).map((entry: TrashEntry) => entry.file.id));
     const merged = new Map<string, T>([...saved, ...files].map(file => [file.id, file]));
     objectStore.put([...merged.values()].filter(file => !purged.has(file.id)), keys[1]);
   });
+}
+
+export async function loadImportedMedia<T extends { id: string }>(uid: string): Promise<T[]> {
+  const [files = [], entries = []] = await Promise.all([
+    get<T[]>(sourceKey(uid, 'imports'), store), get<TrashEntry[]>(trashKey(uid), store),
+  ]);
+  const purged = new Set(entries.filter(entry => entry.purged).map(entry => entry.file.id));
+  return files.filter(file => !purged.has(file.id));
 }
