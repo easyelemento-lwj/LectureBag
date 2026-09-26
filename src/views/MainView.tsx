@@ -1,3 +1,4 @@
+import { getAppCapabilities } from '../utils/appCapabilities';
 /**
  * MainView.tsx — MainView equivalent
  *
@@ -22,7 +23,9 @@ import { RecentRecordingsModal } from '../components/RecentRecordingsModal';
 import { FolderExplorerModal } from '../components/FolderExplorerModal';
 
 export const MainView: React.FC = () => {
-  const state = useAppState();
+  const [capabilities] = useState(() => getAppCapabilities());
+  const { canCapture } = capabilities;
+  const state = useAppState(canCapture);
   const { user } = useAuth();
   const tourOwner = user?.uid ?? 'guest';
   const seenTours = useRef(new Set<TutorialSection>());
@@ -33,18 +36,19 @@ export const MainView: React.FC = () => {
         || localStorage.getItem(`lecturebag_app_tutorial_v3:${tourOwner}`) === 'done';
     } catch { return false; }
   }, [tourOwner]);
-  const [tourSection, setTourSection] = useState<TutorialSection>('camera');
-  const [tourOpen, setTourOpen] = useState(() => !hasSeenTour('camera'));
+  const [tourSection, setTourSection] = useState<TutorialSection>(capabilities.initialScreen);
+  const [tourOpen, setTourOpen] = useState(() => !hasSeenTour(capabilities.initialScreen));
   const [tourIndex, setTourIndex] = useState(0);
   const [completedTour, setCompletedTour] = useState<{ section: TutorialSection; sequence: number } | null>(null);
   const startTour = useCallback((section: TutorialSection, replay = false) => {
+    if (!capabilities.tutorialSections.some(allowed => allowed === section)) return;
     if (!replay && hasSeenTour(section)) return;
     seenTours.current.add(section);
     try { localStorage.setItem(`lecturebag_app_tutorial_v4:${tourOwner}:${section}`, 'seen'); } catch { /* Keep the session marker. */ }
     setTourSection(section);
     setTourIndex(0);
     setTourOpen(true);
-  }, [hasSeenTour, tourOwner]);
+  }, [hasSeenTour, tourOwner, capabilities]);
   useEffect(() => {
     if (!tourOpen) return;
     seenTours.current.add(tourSection);
@@ -64,7 +68,7 @@ export const MainView: React.FC = () => {
     if (completed) {
       state.setIsRecentModalOpen(false);
       state.setIsRecentRecordingsModalOpen(false);
-      if (tourSection === 'camera') {
+      if (tourSection === 'camera' && canCapture) {
         state.setIsAudioMode(true);
         state.setIsFolderExplorerOpen(false);
       } else {
@@ -80,7 +84,7 @@ export const MainView: React.FC = () => {
 
       {/* Global Shutter Flash Animation */}
       <AnimatePresence>
-        {state.shutterFlash && (
+        {canCapture && state.shutterFlash && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.9 }}
@@ -92,6 +96,7 @@ export const MainView: React.FC = () => {
       </AnimatePresence>
 
       {/* ── Main Viewport (Camera / Audio) ── */}
+      {canCapture && <>
       <CameraViewport
         setVideoRef={state.setVideoRef}
         cameraStatus={state.cameraStatus}
@@ -137,9 +142,12 @@ export const MainView: React.FC = () => {
         />
       </div>
 
+      </>}
+
       {/* ── Modals ── */}
       {tourOpen && <AppTutorial steps={tourSteps} index={tourIndex} onStepChange={setTourIndex} onClose={closeTour} />}
 
+      {canCapture && <>
       <RecentPhotosModal
         isOpen={tourStep ? tourStep.chapter === 2 : state.isRecentModalOpen}
         onClose={() => state.setIsRecentModalOpen(false)}
@@ -154,15 +162,18 @@ export const MainView: React.FC = () => {
         onDeleteRecording={state.handleDeleteRecording}
       />
 
+      </>}
+
       <FolderExplorerModal
+        canCapture={canCapture}
         onDeletePhoto={state.handleDeletePhoto}
         onDeleteRecording={state.handleDeleteRecording}
         tutorialStep={tourStep}
         completedTutorial={completedTour}
         onReplayTutorial={(section) => startTour(section, true)}
         onEnterAppCenter={enterAppCenter}
-        isOpen={tourStep ? tourStep.chapter >= 5 : state.isFolderExplorerOpen}
-        onClose={() => state.setIsFolderExplorerOpen(false)}
+        isOpen={!canCapture || (tourStep ? tourStep.chapter >= 5 : state.isFolderExplorerOpen)}
+        onClose={() => { if (canCapture) state.setIsFolderExplorerOpen(false); }}
         currentDocument={state.currentDocument}
         onSelectDocument={(docName) => state.setCurrentDocument(docName)}
         showToast={state.showToast}

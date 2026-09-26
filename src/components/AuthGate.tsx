@@ -1,3 +1,4 @@
+import { getAppCapabilities } from '../utils/appCapabilities';
 import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { Camera, CalendarDays, FolderOpen, Loader2, AlertCircle } from 'lucide-react';
@@ -14,6 +15,11 @@ const features = [
 
 export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   const { user, loading, isConfigured, signInWithGoogle } = useAuth();
+  const [canCapture] = useState(() => getAppCapabilities().canCapture);
+  const visibleFeatures = canCapture ? features : [
+    { icon: FolderOpen, title: '강의 자료를 한곳에 모아요', description: 'PC의 사진과 녹음 파일을 가져와 관리해요.' },
+    ...features.slice(1),
+  ];
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -69,7 +75,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
           </section>
 
           <section aria-label="LectureBag 주요 기능" className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-2xs">
-            {features.map(({ icon: Icon, title, description }) => (
+            {visibleFeatures.map(({ icon: Icon, title, description }) => (
               <div key={title} className="flex items-center gap-3 border-b border-neutral-100 p-4 md:gap-4 md:p-5 last:border-b-0">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-800">
                   <Icon className="h-5 w-5" aria-hidden="true" />

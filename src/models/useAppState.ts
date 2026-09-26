@@ -40,7 +40,7 @@ function formatFileName(date: Date | string): string {
   return `${yyyy}${mm}${dd}_${hh}${min}`;
 }
 
-export function useAppState() {
+export function useAppState(canCapture: boolean) {
   const { user } = useAuth();
   const uid = user?.uid ?? 'guest';
   const { entries: trashEntries, moveToTrash } = useTrash();
@@ -51,7 +51,7 @@ export function useAppState() {
 
   // ── Document / Folder ──────────────────────────────────────────────────
   const [currentDocument, setCurrentDocument] = useState<string>('디지털 디톡스 가이드.md');
-  const [isFolderExplorerOpen, setIsFolderExplorerOpen] = useState<boolean>(false);
+  const [isFolderExplorerOpen, setIsFolderExplorerOpen] = useState<boolean>(!canCapture);
 
   // ── Gemini & Timetable ─────────────────────────────────────────────────
   const [timetableImage, setTimetableImage] = useState<string | null>(() => {
@@ -203,6 +203,7 @@ export function useAppState() {
 
   // ── Camera stream lifecycle ───────────────────────────────────────────
   useEffect(() => {
+    if (!canCapture) return;
     let cancelled = false;
 
     const startStream = async () => {
@@ -248,7 +249,7 @@ export function useAppState() {
 
     startStream();
     return () => { cancelled = true; };
-  }, [cameraFacing]);
+  }, [cameraFacing, canCapture]);
 
   useEffect(() => {
     return () => {
@@ -292,6 +293,7 @@ export function useAppState() {
 
   const handleStartRecording = useCallback(async (e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (!canCapture) return;
     try {
       // 1. 기기 마이크 오디오 스트림 획득
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -329,7 +331,7 @@ export function useAppState() {
       console.error('Failed to access microphone:', err);
       alert('마이크 접근 권한이 필요합니다. 기기 설정에서 마이크를 허용해주세요.');
     }
-  }, []);
+  }, [canCapture]);
 
   const handleTogglePauseRecording = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -423,7 +425,7 @@ export function useAppState() {
   }, [photos, moveToTrash]);
 
   const handleTakeSnapshot = useCallback(() => {
-    if (isCapturing) return;
+    if (!canCapture || isCapturing) return;
     setIsCapturing(true);
     playShutterSound();
     setShutterFlash(true);
@@ -499,7 +501,7 @@ export function useAppState() {
 
     setIsCapturing(false);
     showToast('강의 사진이 촬영되어 저장되었습니다');
-  }, [isCapturing, cameraStatus, cameraFacing, aspectRatio, showToast]);
+  }, [canCapture, isCapturing, cameraStatus, cameraFacing, aspectRatio, showToast]);
 
   const toggleAspectRatio = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

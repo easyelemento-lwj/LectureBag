@@ -81,6 +81,7 @@ export const getPersistedAiDocs = (uid: string): MediaFile[] => {
 };
 
 interface FolderExplorerModalProps {
+  canCapture?: boolean;
   tutorialStep?: TutorialStep;
   completedTutorial?: { section: TutorialSection; sequence: number } | null;
   onReplayTutorial?: (section: TutorialSection) => void;
@@ -545,6 +546,7 @@ const HoldableFileCard: React.FC<HoldableFileCardProps> = ({
 };
 
 export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
+  canCapture = true,
   tutorialStep,
   completedTutorial,
   onReplayTutorial,
@@ -1812,7 +1814,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           className="pb-3 px-5 bg-white border-b border-neutral-200/80 flex items-center justify-between shadow-2xs"
           style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}
         >
-          <button
+          {!canCapture && navPath.length === 0 ? (
+            <img src="/lecturebag-logo.png" alt="LectureBag" className="h-11 w-11 rounded-xl object-contain" />
+          ) : <button
             onClick={() => {
               if (navPath.length > 0) {
                 setNavPath(navPath.slice(0, navPath.length - 1));
@@ -1824,7 +1828,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
             title="뒤로가기"
           >
             <ArrowLeft className="w-5.5 h-5.5" />
-          </button>
+          </button>}
 
           <div className="flex items-center gap-2.5 relative">
             {/* 플러스 (외부 파일 추가) 버튼 */}
@@ -1889,14 +1893,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               </svg>
             </button>
 
-            {/* 닫기 (Close) 버튼 */}
-            <button
+            {/* Mobile returns to the capture screen; desktop stays in its workspace. */}
+            {canCapture && <button
               onClick={onClose}
               className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
               title="닫기"
             >
               <X className="w-5.5 h-5.5" />
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -2333,7 +2337,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   <div>
                     <h4 className="text-sm font-bold text-neutral-800">저장된 데이터가 없습니다</h4>
                     <p className="text-xs text-neutral-500 mt-1 max-w-xs mx-auto">
-                      새로운 강의 사진 촬영이나 녹음을 진행하시면 촬영/녹음 날짜 기준의 연도, 학기, 월, 일자 폴더가 자동으로 생성됩니다.
+                      {canCapture
+                        ? '새로운 강의 사진 촬영이나 녹음을 진행하시면 촬영/녹음 날짜 기준의 연도, 학기, 월, 일자 폴더가 자동으로 생성됩니다.'
+                        : 'PC에 있는 사진과 녹음 파일을 가져오세요. 파일 날짜와 선택한 정리 방식에 맞춰 폴더가 자동으로 생성됩니다.'}
                     </p>
                   </div>
                   <div className="pt-2 flex justify-center gap-2">
@@ -3981,7 +3987,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             { section: 'camera', title: '카메라·녹음', description: '촬영과 녹음 화면을 살펴봐요.' },
                             { section: 'explorer', title: '파일 탐색기', description: '파일 찾기, 선택과 활용 방법을 알아봐요.' },
                             { section: 'apps', title: '앱 센터', description: '시간표 등록과 AI 센터를 살펴봐요.' },
-                          ] satisfies { section: TutorialSection; title: string; description: string }[]).map(item => (
+                          ] satisfies { section: TutorialSection; title: string; description: string }[]).filter(item => canCapture || item.section !== 'camera').map(item => (
                             <button
                               key={item.section}
                               type="button"
