@@ -1,3 +1,4 @@
+import { cameraFrame } from '../utils/cameraFrame';
 /**
  * useAppState.ts — DataModel equivalent
  *
@@ -432,28 +433,12 @@ export function useAppState() {
     const video = videoRef.current;
     let dataUrl = '';
 
-    // Determine target canvas dimensions based on current aspect ratio
-    let width = 1080;
-    let height = 1440; // 4:3 default (3:4 portrait)
-    if (aspectRatio === '1:1') {
-      width = 1080;
-      height = 1080;
-    } else if (aspectRatio === '16:9') {
-      width = 1080;
-      height = 1920;
-    } else if (aspectRatio === '전체') {
-      // Full screen ratio based on viewport
-      const vRatio = window.innerWidth / (window.innerHeight || 1);
-      if (vRatio > 1) {
-        // Landscape full screen
-        width = 1920;
-        height = Math.round(1920 / vRatio);
-      } else {
-        // Portrait full screen
-        height = 1920;
-        width = Math.round(1920 * vRatio);
-      }
-    }
+    // Match the visible crop, including landscape and installed-app viewport size.
+    const bounds = video?.parentElement?.getBoundingClientRect();
+    const frame = cameraFrame(bounds?.width || window.innerWidth, bounds?.height || window.innerHeight, aspectRatio);
+    const scale = 1920 / Math.max(frame.width, frame.height);
+    const width = Math.max(1, Math.round(frame.width * scale));
+    const height = Math.max(1, Math.round(frame.height * scale));
 
     canvas.width = width;
     canvas.height = height;

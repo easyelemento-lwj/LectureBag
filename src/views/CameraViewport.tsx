@@ -1,3 +1,4 @@
+import { cameraFrame } from '../utils/cameraFrame';
 /**
  * CameraViewport.tsx — ContentDetail equivalent
  *
@@ -67,17 +68,21 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
   const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  const [isLandscape, setIsLandscape] = useState<boolean>(() =>
-    typeof window !== 'undefined' ? window.innerWidth > window.innerHeight : false
-  );
-
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   useEffect(() => {
-    const handleResize = () => {
-      setIsLandscape(window.innerWidth > window.innerHeight);
+    const element = viewportRef.current;
+    if (!element) return;
+    const measure = () => {
+      const { width, height } = element.getBoundingClientRect();
+      setViewportSize({ width, height });
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
+  const frame = cameraFrame(viewportSize.width, viewportSize.height, aspectRatio);
 
   // ── 60fps Canvas Direct Render Pipeline ──────────────────────────────────
   // Bypasses iOS WebKit's <video> hardware letterbox clipping entirely by
@@ -156,43 +161,9 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
     setTimeout(() => setFocusPoint(null), 1200);
   };
 
-  // Determine aspect ratio class & max dimensions (Reduce longer side from '전체' full screen)
-  const getAspectRatioClasses = () => {
-    if (aspectRatio === '전체') {
-      return 'w-full h-full max-w-none max-h-none rounded-none';
-    }
-
-    if (isLandscape) {
-      // Landscape screen (Width is longer edge).
-      // Keep height 100% and reduce width to match target aspect ratio.
-      switch (aspectRatio) {
-        case '1:1':
-          return 'h-full w-auto aspect-square max-w-full rounded-none shadow-2xl my-auto';
-        case '4:3':
-          return 'h-full w-auto aspect-[4/3] max-w-full rounded-none shadow-2xl my-auto';
-        case '16:9':
-          return 'h-full w-auto aspect-[16/9] max-w-full rounded-none shadow-2xl my-auto';
-        default:
-          return 'w-full h-full rounded-none';
-      }
-    } else {
-      // Portrait screen (Height is longer edge).
-      // Keep width 100% and reduce height to match target aspect ratio.
-      switch (aspectRatio) {
-        case '1:1':
-          return 'w-full h-auto aspect-square max-h-full rounded-none shadow-2xl my-auto';
-        case '4:3':
-          return 'w-full h-auto aspect-[3/4] max-h-full rounded-none shadow-2xl my-auto';
-        case '16:9':
-          return 'w-full h-auto aspect-[9/16] max-h-full rounded-none shadow-2xl my-auto';
-        default:
-          return 'w-full h-full rounded-none';
-      }
-    }
-  };
-
   return (
     <div
+      ref={viewportRef}
       onClick={handleViewportTap}
       className="absolute inset-0 w-full h-full bg-black overflow-hidden flex items-center justify-center select-none"
     >
@@ -266,7 +237,7 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
           </div>
         </div>
       ) : (
-        /* ── Normal Camera Viewport Mode (Always Edge-to-Edge Full Screen) ── */
+        /* ── Normal Camera Viewport Mode ── */
         <div className="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden bg-black">
           {/* Hidden Background Video Stream Receiver */}
           <video
@@ -288,8 +259,8 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
             }}
           />
 
-          {/* 60fps Fullscreen Canvas Direct Render Viewfinder (100% Edge-to-Edge) */}
-          <div className="absolute inset-0 w-full h-full overflow-hidden bg-black">
+          {/* Camera image and grid share the selected aspect-ratio frame */}
+          <div className="relative shrink-0 overflow-hidden bg-black" style={frame}>
             <canvas
               ref={liveCanvasRef}
               className="absolute inset-0 w-full h-full object-cover select-none pointer-events-none"
@@ -303,14 +274,8 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
                 height: '100%',
               }}
             />
-          </div>
-
-          {/* Dynamic Aspect Ratio Guide Frame & 3x3 Grid Overlay */}
-          <motion.div
-            layout
-            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-            className={`pointer-events-none transition-all duration-300 z-10 ${getAspectRatioClasses()}`}
-          >
+          {/* Grid uses the same bounds as the actual camera image. */}
+          <div className="absolute inset-0 pointer-events-none z-10">
             {/* 3x3 Grid Overlay */}
             <div className="w-full h-full border border-white/20 grid grid-cols-3 grid-rows-3">
               <div className="border-r border-b border-white/20" />
@@ -323,7 +288,8 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
               <div className="border-r border-b border-white/20" />
               <div />
             </div>
-          </motion.div>
+          </div>
+          </div>
 
           {/* HUD Overlays (Controls, Status & Action Buttons) */}
           <CameraHUD
