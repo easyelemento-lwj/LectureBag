@@ -155,7 +155,7 @@ async def generate(uid: str, contents, *, json_output=False):
         try:
             async with client.aio as ai:
                 response = await asyncio.wait_for(generate_with_retry(ai,
-                    model=os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash'), contents=contents,
+                    model=os.environ.get('GEMINI_MODEL', 'gemini-3.8-flash'), contents=contents,
                     config=types.GenerateContentConfig(max_output_tokens=4096,
                         response_mime_type='application/json' if json_output else 'text/plain')),
                     timeout=55)
