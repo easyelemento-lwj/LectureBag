@@ -133,6 +133,18 @@ def parse_media(data_url: str, images_only=False):
     return types.Part.from_bytes(data=data, mime_type=mime)
 
 
+async def generate_with_retry(ai, **kwargs):
+    # The caller's 55-second deadline and Redis lease cover both attempts.
+    for attempt in range(2):
+        try:
+            return await ai.models.generate_content(**kwargs)
+        except errors.APIError as exc:
+            if attempt or exc.code not in {500, 502, 503, 504}:
+                raise
+            logger.warning('ai_provider_retry status=%s', exc.code)
+            await asyncio.sleep(1)
+
+
 async def generate(uid: str, contents, *, json_output=False):
     api_key = os.environ.get('GEMINI_API_KEY', '').strip().strip('"').strip("'")
     if not api_key:
@@ -142,7 +154,7 @@ async def generate(uid: str, contents, *, json_output=False):
             timeout=55000, retry_options=types.HttpRetryOptions(attempts=1)))
         try:
             async with client.aio as ai:
-                response = await asyncio.wait_for(ai.models.generate_content(
+                response = await asyncio.wait_for(generate_with_retry(ai,
                     model=os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash'), contents=contents,
                     config=types.GenerateContentConfig(max_output_tokens=4096,
                         response_mime_type='application/json' if json_output else 'text/plain')),
@@ -159,7 +171,7 @@ async def generate(uid: str, contents, *, json_output=False):
             code = {400: 'AI_INPUT_REJECTED', 401: 'AI_KEY_REJECTED',
                     403: 'AI_KEY_REJECTED', 404: 'AI_MODEL_UNAVAILABLE',
                     429: 'AI_PROVIDER_QUOTA'}.get(exc.code, 'AI_PROVIDER_ERROR')
-            logger.warning('ai_provider_failed category=%s', code)
+            logger.warning('ai_provider_failed category=%s status=%s', code, exc.code if isinstance(exc.code, int) else 'unknown')
             raise HTTPException(502, {'code': code}) from None
         except Exception:
             # Do not put API keys, request bodies or upstream error text in responses/logs.

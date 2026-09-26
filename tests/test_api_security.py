@@ -146,3 +146,28 @@ def test_localhost_cors_supports_real_development_port():
     response = request('OPTIONS', '/api/generate', headers={'Origin': 'http://localhost:3000', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type'})
     assert response.status_code == 200
     assert response.headers['access-control-allow-origin'] == 'http://localhost:3000'
+
+@pytest.mark.parametrize('status,recover,expected_calls', [
+    (503, True, 2), (500, False, 2), (429, False, 1), (403, False, 1), (404, False, 1),
+])
+def test_provider_retry_is_bounded_and_only_for_transient_errors(monkeypatch, status, recover, expected_calls):
+    from types import SimpleNamespace
+    calls = []
+    async def content(**kwargs):
+        calls.append(kwargs)
+        if recover and len(calls) == 2:
+            return 'success'
+        raise api.errors.APIError(status, {'error': {'message': 'private upstream details'}})
+    async def sleep(seconds):
+        assert seconds == 1
+    monkeypatch.setattr(api.asyncio, 'sleep', sleep)
+    async def run():
+        coroutine = api.generate_with_retry(SimpleNamespace(models=SimpleNamespace(generate_content=content)), contents='test')
+        if recover:
+            assert await coroutine == 'success'
+        else:
+            with pytest.raises(api.errors.APIError):
+                await coroutine
+    asyncio.run(run())
+    assert len(calls) == expected_calls
+    assert all(call == {'contents': 'test'} for call in calls)

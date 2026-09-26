@@ -79,6 +79,7 @@ export const getPersistedAiDocs = (uid: string): MediaFile[] => {
 
 interface FolderExplorerModalProps {
   tutorialStep?: TutorialStep;
+  completedTutorial?: { section: TutorialSection; sequence: number } | null;
   onReplayTutorial?: (section: TutorialSection) => void;
   onEnterAppCenter?: () => void;
   onDeletePhoto: (id: string) => void;
@@ -542,6 +543,7 @@ const HoldableFileCard: React.FC<HoldableFileCardProps> = ({
 
 export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   tutorialStep,
+  completedTutorial,
   onReplayTutorial,
   onEnterAppCenter,
   onDeletePhoto,
@@ -634,6 +636,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const [infoModalItem, setInfoModalItem] = useState<MediaFile | null>(null);
 
   // AI Processing Session State (Only active processing items remain here)
+  const aiSessionRunners = useRef(new Map<string, () => Promise<void>>());
   const cancelledSessionsRef = useRef<Set<string>>(new Set());
   const [aiSessions, setAiSessions] = useState<Array<{
     id: string;
@@ -807,13 +810,17 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       showToast('⚡ AI 정리가 시작되었습니다! 실시간 진행 상황을 확인하세요.');
     }, 1000);
 
-    // 백그라운드 실제 분석 진행
-    (async () => {
+    // Keep successful results in this session when a later file fails.
+    let fullMarkdown = `# ${cleanTitle} 통합 분석 결과\n\n`;
+    let snippet = '';
+    let completedCount = 0;
+    let running = false;
+    const runSession = async () => {
+      if (running || cancelledSessionsRef.current.has(newSessionId)) return;
+      running = true;
+      setAiSessions(prev => prev.map(s => s.id === newSessionId ? { ...s, status: 'processing' } : s));
       try {
-        let fullMarkdown = `# ${cleanTitle} 통합 분석 결과\n\n`;
-        let snippet = '';
-
-        for (let i = 0; i < selectedFiles.length; i++) {
+        for (let i = completedCount; i < selectedFiles.length; i++) {
           if (cancelledSessionsRef.current.has(newSessionId)) {
             cancelledSessionsRef.current.delete(newSessionId);
             return;
@@ -836,6 +843,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           }
           
           fullMarkdown += `## ${file.name}\n\n${summary}\n\n---\n\n`;
+          completedCount = i + 1;
+          setAiSessions(prev => prev.map(s => s.id === newSessionId ? { ...s, progress: Math.round(completedCount / selectedFiles.length * 100) } : s));
           if (i === 0) {
             snippet = summary.substring(0, 150) + '...';
           }
@@ -875,17 +884,22 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           return updated;
         });
 
+        aiSessionRunners.current.delete(newSessionId);
         showToast(`🎉 [${mdFileName}] AI 정리가 완료되어 AI 센터에 저장되었습니다!`);
 
       } catch (err: any) {
         setAiSessions(prev => prev.map(s => s.id === newSessionId ? {
           ...s,
           status: 'error',
-          currentStep: `오류 발생: ${err.message}`,
+          currentStep: `${completedCount}/${selectedFiles.length}개 완료 · ${err.message} 이어서 시도하면 완료된 파일은 다시 처리하지 않습니다.`,
         } : s));
         showToast(`❌ AI 정리 중 오류가 발생했습니다: ${err.message}`);
+      } finally {
+        running = false;
       }
-    })();
+    };
+    aiSessionRunners.current.set(newSessionId, runSession);
+    void runSession();
   };
 
   const toggleSelectItem = (id: string) => {
@@ -1283,6 +1297,31 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         hierarchy: getFolderHierarchyFromDate(file.timestamp, file.name, timetables)
       }));
   }, [mediaList, timetables]);
+
+  const appliedTutorialCompletion = useRef(0);
+  useEffect(() => {
+    if (!completedTutorial || tutorialStep || appliedTutorialCompletion.current === completedTutorial.sequence) return;
+    appliedTutorialCompletion.current = completedTutorial.sequence;
+    setIsTutorialPickerOpen(false);
+    setIsSearchOpen(false);
+    setIsSelectionMode(false);
+    setSelectedItemIds([]);
+    setIsReorderMode(false);
+    if (completedTutorial.section === 'apps') {
+      setIsSettingsOpen(true);
+      setActiveSettingDetail('ai_center');
+    } else if (completedTutorial.section === 'explorer') {
+      setIsSettingsOpen(false);
+      setActiveSettingDetail(null);
+      // Leave the user in a real file folder, never persist tutorial fixtures.
+      if (!savedNavPath.length && organizedFiles.length) {
+        const h = organizedFiles[0].hierarchy;
+        setNavPath(savedStorageMode === 'timetable'
+          ? [h.year, h.semester, h.subject, h.month, h.day]
+          : [h.year, h.halfYear, h.month, h.day]);
+      }
+    }
+  }, [completedTutorial, tutorialStep, organizedFiles, savedNavPath, savedStorageMode]);
 
   // Filtered organized files based on global selectedFileFilters bubble selection
   const filteredOrganizedFiles = useMemo(() => {
@@ -3883,8 +3922,15 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                   <span className="text-xs font-extrabold text-neutral-800 bg-neutral-100 px-2.5 py-1 rounded-full border border-neutral-200 shrink-0">
                                     {session.status === 'error' ? '실패' : `${session.progress}%`}
                                   </span>
+                                  {session.status === 'error' && (
+                                    <button type="button" onClick={() => void aiSessionRunners.current.get(session.id)?.()}
+                                      className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-bold text-white">
+                                      이어서 시도
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => {
+                                      aiSessionRunners.current.delete(session.id);
                                       cancelledSessionsRef.current.add(session.id);
                                       setAiSessions((prev) => prev.filter((s) => s.id !== session.id));
                                       showToast(`'${session.title}' AI 정리 세션이 취소되었습니다.`);
@@ -3913,7 +3959,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                 <motion.div
                                   className="h-full bg-neutral-900"
                                   initial={{ width: 0 }}
-                                  animate={{ width: `${session.status === 'error' ? '실패' : `${session.progress}%`}` }}
+                                  animate={{ width: `${session.progress}%` }}
                                   transition={{ duration: 0.5 }}
                                 />
                               </div>
@@ -3990,27 +4036,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                       )}
                       </div>
                     )}
-                    <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
-                          <Info className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-neutral-900">Vault Camera & Audio v1.2.0</h4>
-                          <p className="text-[11px] text-neutral-400">자동 파일 분류 시스템</p>
-                        </div>
-                      </div>
-
-                      <div className="text-xs text-neutral-600 space-y-2 leading-relaxed border-t border-neutral-100 pt-3">
-                        <p className="font-semibold text-neutral-900">
-                          Vault 시스템은 사진 촬영 시각 및 녹음 시각에 따라 파일을 규칙적으로 자동 저장하는 스마트 앨범입니다.
-                        </p>
-                        <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200/60 space-y-1 text-[11px]">
-                          <p className="font-bold text-neutral-800">📁 폴더 구조 규칙 (디폴트 모드)</p>
-                          <p className="text-neutral-600">연도 → 상하반기 (1~6월 / 7~12월) → 달 → 일</p>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>

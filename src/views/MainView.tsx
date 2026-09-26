@@ -36,6 +36,7 @@ export const MainView: React.FC = () => {
   const [tourSection, setTourSection] = useState<TutorialSection>('camera');
   const [tourOpen, setTourOpen] = useState(() => !hasSeenTour('camera'));
   const [tourIndex, setTourIndex] = useState(0);
+  const [completedTour, setCompletedTour] = useState<{ section: TutorialSection; sequence: number } | null>(null);
   const startTour = useCallback((section: TutorialSection, replay = false) => {
     if (!replay && hasSeenTour(section)) return;
     seenTours.current.add(section);
@@ -59,7 +60,20 @@ export const MainView: React.FC = () => {
   // Only the presentation changes during the guide; MediaRecorder is never started.
   const recording = tourStep ? ['pause', 'resume', 'stop'].includes(tourStep.target) : state.isRecording;
   const paused = tourStep ? ['resume', 'stop'].includes(tourStep.target) : state.isPaused;
-  const closeTour = useCallback(() => setTourOpen(false), []);
+  const closeTour = (completed: boolean) => {
+    if (completed) {
+      state.setIsRecentModalOpen(false);
+      state.setIsRecentRecordingsModalOpen(false);
+      if (tourSection === 'camera') {
+        state.setIsAudioMode(true);
+        state.setIsFolderExplorerOpen(false);
+      } else {
+        state.setIsFolderExplorerOpen(true);
+        setCompletedTour(previous => ({ section: tourSection, sequence: (previous?.sequence ?? 0) + 1 }));
+      }
+    }
+    setTourOpen(false);
+  };
 
   return (
     <div className="absolute inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
@@ -144,6 +158,7 @@ export const MainView: React.FC = () => {
         onDeletePhoto={state.handleDeletePhoto}
         onDeleteRecording={state.handleDeleteRecording}
         tutorialStep={tourStep}
+        completedTutorial={completedTour}
         onReplayTutorial={(section) => startTour(section, true)}
         onEnterAppCenter={enterAppCenter}
         isOpen={tourStep ? tourStep.chapter >= 5 : state.isFolderExplorerOpen}
