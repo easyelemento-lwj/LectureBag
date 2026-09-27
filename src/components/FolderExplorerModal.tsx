@@ -1,3 +1,4 @@
+import { dataUrlFileSize } from '../utils/fileSize';
 import { StorageModeGuide } from './StorageModeGuide';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
@@ -571,7 +572,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const uid = user?.uid ?? 'guest';
   const { entries: trashEntries, moveToTrash, restore, permanentlyDelete } = useTrash();
   const [trashBusy, setTrashBusy] = useState(false);
-  const deletedEntries = tutorialStep ? [] : trashEntries.filter(entry => !entry.restored && !entry.purged);
+  const deletedEntries = tutorialStep ? [] : trashEntries.filter(entry => !entry.restored && !entry.purged)
+    .map(entry => entry.file.type === 'photo' && entry.file.dataUrl
+      ? { ...entry, file: { ...entry.file, fileSize: dataUrlFileSize(entry.file.dataUrl) } } : entry);
   const { accentColor } = useAccentColor();
   const storageMode = tutorialStep ? (tutorialStep.chapter === 8 && tutorialStep.target === 'schedule' ? 'timetable' : 'default') : savedStorageMode;
   // Folder Navigation Level Path:
@@ -659,7 +662,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     const deletedIds = new Set(trashEntries.filter(entry => !entry.restored).map(entry => entry.file.id));
     const existingIds = new Set(savedMediaList.map(file => file.id));
     return [...savedMediaList, ...trashEntries.filter(entry => entry.restored && !existingIds.has(entry.file.id)).map(entry => entry.file)]
-      .filter(file => !deletedIds.has(file.id));
+      .filter(file => !deletedIds.has(file.id))
+      .map(file => file.type === 'photo' && file.dataUrl ? { ...file, fileSize: dataUrlFileSize(file.dataUrl) } : file);
   }, [tutorialStep, savedMediaList, trashEntries]);
 
   const trashFiles = async (files: MediaFile[]) => {

@@ -1,3 +1,4 @@
+import { dataUrlFileSize } from './fileSize';
 import { MediaFile, CapturedPhoto, RecordedAudio, TimetableEntry, SemesterTimetable } from '../types';
 
 export interface FolderNode {
@@ -136,7 +137,7 @@ export function getSampleMediaFiles(capturedPhotos: CapturedPhoto[], recordings:
       type: 'photo',
       name: uniqueName,
       dataUrl: p.dataUrl,
-      fileSize: '2.4 MB',
+      fileSize: dataUrlFileSize(p.dataUrl),
       timestamp: p.timestamp,
       mode: p.mode || 'PPT/판서',
     };
