@@ -1,5 +1,6 @@
 """Internal-only Drive connection milestone; disabled unless explicitly enabled."""
 import asyncio
+import logging
 import os
 import uuid
 import hashlib
@@ -17,6 +18,8 @@ from google.api_core.exceptions import GoogleAPIError
 from drive_catalog import DriveCatalog, public_state
 from drive_google import GoogleDrive, failure
 from drive_token_store import token_store
+
+logger = logging.getLogger('lecturebag.drive')
 
 
 class ConnectRequest(BaseModel):
@@ -56,7 +59,10 @@ async def services(firebase_app):
     try:
         async with token_store() as tokens:
             yield DriveServices(DriveCatalog(firestore.client(app=firebase_app())), tokens, GoogleDrive())
-    except (RedisError, GoogleAPIError):
+    except (RedisError, GoogleAPIError) as error:
+        # Keep client errors opaque, but retain the failing dependency class in
+        # Railway logs. Never log tokens, Redis URLs, or provider responses.
+        logger.warning('Drive storage dependency unavailable: %s', type(error).__name__)
         raise failure(503, 'DRIVE_STORAGE_UNAVAILABLE') from None
 
 
