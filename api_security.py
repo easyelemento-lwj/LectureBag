@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_BODY_BYTES = 14 * 1024 * 1024
+MAX_DRIVE_BODY_BYTES = 64 * 1024
 
 
 class RequestBoundary:
@@ -33,8 +34,9 @@ class RequestBoundary:
                 ])
             await send(message)
 
-        if scope['method'] != 'POST':
+        if scope['method'] not in ('POST', 'PUT', 'PATCH', 'DELETE'):
             return await self.app(scope, receive, secure_send)
+        limit = MAX_DRIVE_BODY_BYTES if scope.get('path', '').startswith(('/api/drive/', '/api/cloud-')) else MAX_BODY_BYTES
         headers = dict(scope.get('headers', []))
         try:
             length = int(headers.get(b'content-length', b'0'))
@@ -42,7 +44,7 @@ class RequestBoundary:
                 raise ValueError()
         except ValueError:
             return await JSONResponse({'detail': '잘못된 요청입니다.'}, 400)(scope, receive, secure_send)
-        if length > MAX_BODY_BYTES:
+        if length > limit:
             return await JSONResponse({'detail': '파일이 너무 큽니다.'}, 413)(scope, receive, secure_send)
         # Enforce the same bound for chunked requests before JSON/base64 parsing.
         body = bytearray()
@@ -58,7 +60,7 @@ class RequestBoundary:
             if message['type'] == 'http.disconnect':
                 return
             body.extend(message.get('body', b''))
-            if len(body) > MAX_BODY_BYTES:
+            if len(body) > limit:
                 return await JSONResponse({'detail': '파일이 너무 큽니다.'}, 413)(scope, receive, secure_send)
             if not message.get('more_body', False):
                 break

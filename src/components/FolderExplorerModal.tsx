@@ -1,5 +1,6 @@
 import { dataUrlFileSize } from '../utils/fileSize';
 import { StorageModeGuide } from './StorageModeGuide';
+import { DriveConnectionPanel } from './DriveConnectionPanel';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import {
@@ -3106,6 +3107,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     </p>
 
                     {/* Grouped Settings List */}
+                    {import.meta.env.VITE_DRIVE_INTERNAL_PREVIEW === 'true' && <DriveConnectionPanel />}
                     <div className="bg-white rounded-2xl border border-neutral-200/80 divide-y divide-neutral-100 shadow-2xs overflow-hidden">
                       {/* 1. 회원정보 (User Profile) */}
                       <button

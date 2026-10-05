@@ -9,14 +9,27 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 
 const temp = await mkdtemp(join(tmpdir(), 'lecturebag-platform-ui-'));
+const drivePreview = process.env.DRIVE_PREVIEW_TEST === '1';
 const assets = join(resolve(process.argv[2] || 'dist'), 'assets');
 const css = await readFile(join(assets, (await readdir(assets)).find(name => name.endsWith('.css'))));
 await build({ entryPoints: ['src/main.tsx'], bundle: true, outfile: join(temp, 'app.js'), format: 'iife', jsx: 'automatic',
-  define: { 'import.meta.env': '{}', 'process.env.NODE_ENV': '"production"' },
+  define: { 'import.meta.env': JSON.stringify(drivePreview ? { VITE_DRIVE_INTERNAL_PREVIEW: 'true' } : {}), 'process.env.NODE_ENV': '"production"' },
   plugins: [{ name: 'isolated-test-services', setup(b) {
     b.onResolve({ filter: /AuthContext(?:\.tsx)?$/ }, () => ({ path: 'auth', namespace: 'fixture' }));
     b.onResolve({ filter: /\/firebase(?:\.ts)?$/ }, () => ({ path: 'firebase', namespace: 'fixture' }));
     b.onResolve({ filter: /\.css$/ }, () => ({ path: 'style', namespace: 'fixture' }));
+    if (drivePreview) {
+      b.onResolve({ filter: /services\/drive\/cloudCatalog$/ }, () => ({ path: 'catalog', namespace: 'drive-fixture' }));
+      b.onResolve({ filter: /services\/drive\/driveAuth$/ }, () => ({ path: 'oauth', namespace: 'drive-fixture' }));
+      b.onLoad({ filter: /.*/, namespace: 'drive-fixture' }, ({ path }) => ({ contents: path === 'oauth'
+        ? `export const loadDriveOAuth=async()=>({}); export const requestDriveCode=async()=>"mock-code";`
+        : `let state={connected:false,revision:0}; export class CloudCatalog {
+            async status(){return state}
+            async start(){return {clientId:"mock-client",state:"mock-state",expiresIn:300}}
+            async connect(){state={connected:true,revision:1,connectionId:"mock-connection",email:"drive@example.invalid"};return state}
+            async disconnect(){state={connected:false,revision:2};return state}
+          }`, loader: 'js' }));
+    }
     b.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'auth'
       ? `const user = {uid:'platform-test', displayName:'Test', email:'test@example.invalid'}; export const AuthProvider=({children})=>children; export const useAuth=()=>({user,loading:false,isConfigured:true,signOut:async()=>{},signInWithGoogle:async()=>({})});`
       : path === 'firebase' ? 'export const auth={currentUser:null};' : '', loader: 'js' }));
@@ -94,6 +107,18 @@ try {
       // App center can close back to the explorer, never to a camera or blank screen.
       await evaluate(`document.querySelector('[data-tour="apps"]').click()`);
       await wait(`document.body.innerText.includes('APP CENTRE')`);
+      if (drivePreview) {
+        await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.innerText==='Google Drive 연결' && !b.disabled)`);
+        assert.ok((await evaluate('document.body.innerText')).includes('자동 업로드는 아직 활성화되지 않았습니다'));
+        await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.innerText==='Google Drive 연결').click()`);
+        await wait(`document.body.innerText.includes('연결됨: drive@example.invalid')`);
+        await evaluate(`window.confirm=()=>true; Array.from(document.querySelectorAll('button')).find(b=>b.innerText==='연결 해제').click()`);
+        await wait(`document.body.innerText.includes('연결되지 않음')`);
+        assert.equal(await evaluate(`Object.keys(localStorage).some(k=>/token|drive.*code/i.test(k))`), false);
+        console.log('PASS Drive preview: connect, status, disconnect, no persistent tokens');
+      } else {
+        assert.equal(await evaluate(`!!document.querySelector('[aria-label="Google Drive 연결 시험"]')`), false);
+      }
       await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.innerText.includes('앱 설명')).click()`);
       await wait(`document.body.innerText.includes('튜토리얼 다시보기')`);
       await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.innerText.includes('튜토리얼 다시보기')).click()`);

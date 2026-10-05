@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All application reads/writes go through authenticated Railway APIs.
+    // Admin SDK bypasses these rules; server-side UID checks are mandatory.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

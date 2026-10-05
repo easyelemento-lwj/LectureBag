@@ -1,0 +1,16 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "cloudFiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "connectionId", "order": "ASCENDING" },
+        { "fieldPath": "logicalFolderId", "order": "ASCENDING" },
+        { "fieldPath": "deletedAt", "order": "ASCENDING" },
+        { "fieldPath": "capturedAt", "order": "DESCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

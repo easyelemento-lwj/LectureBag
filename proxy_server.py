@@ -20,6 +20,7 @@ from google.genai import types, errors
 from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
 from api_security import AiQuota, MAX_FILE_BYTES, RequestBoundary
+from drive_routes import create_drive_router
 
 load_dotenv()
 logger = logging.getLogger('lecturebag.api')
@@ -30,7 +31,7 @@ app.add_middleware(CORSMiddleware,
     allow_origins=['https://lecturebag.web.app', 'https://lecturebag.firebaseapp.com',
                    'http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173'],
     allow_credentials=False, allow_methods=['GET', 'POST'],
-    allow_headers=['Content-Type', 'Authorization'], expose_headers=['X-Request-ID', 'Retry-After'])
+    allow_headers=['Content-Type', 'Authorization', 'X-Requested-With'], expose_headers=['X-Request-ID', 'Retry-After'])
 quota = AiQuota()
 MAX_DATA_URL = 4 * ((MAX_FILE_BYTES + 2) // 3) + 128
 
@@ -61,6 +62,9 @@ async def verify_firebase_token(authorization: str | None = Header(None)):
         raise HTTPException(401, '유효하지 않거나 만료된 인증 정보입니다.') from None
     except Exception:
         raise HTTPException(503, '인증 서비스를 잠시 사용할 수 없습니다.') from None
+
+
+app.include_router(create_drive_router(verify_firebase_token, firebase_app))
 
 
 class StrictModel(BaseModel):
