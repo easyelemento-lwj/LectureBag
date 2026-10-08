@@ -26,6 +26,10 @@ class MemoryCatalog:
     def __init__(self):
         self.values = {}
         self.files = {}
+        self.reservations = {}
+
+    def reserve_id(self, uid, connection, key, candidate):
+        return self.reservations.setdefault((uid, key), candidate)
 
     def get(self, uid):
         return copy.deepcopy(self.values.get(uid, empty_state()))
@@ -103,6 +107,30 @@ async def connect(client):
     body = {'state': challenge.json()['state'], 'code': 'synthetic-code'}
     response = await client.post('/api/drive/connect', json=body)
     return response, body
+
+
+def test_transfer_credentials_and_reservations_are_connection_bound(monkeypatch):
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            response, _ = await connect(client)
+            connection = response.json()['connectionId']
+            body = {'connectionId': connection}
+            token = await client.post('/api/drive/transfer-token', json=body)
+            assert token.status_code == 200
+            assert 'no-store' in token.headers['cache-control']
+            assert token.json()['accessToken'] == 'synthetic-access'
+            assert 'synthetic-refresh-secret' not in token.text
+            assert token.json()['ownerHash'] == hashlib.sha256(b'alice').hexdigest()
+            reservation = {**body, 'key': 'root', 'candidate': 'reserved-first'}
+            first = await client.post('/api/drive/reserve-id', json=reservation)
+            second = await client.post('/api/drive/reserve-id', json={**reservation, 'candidate': 'reserved-second'})
+            assert first.json() == second.json() == {'id': 'reserved-first'}
+            stale = {'connectionId': str(uuid.uuid4())}
+            assert (await client.post('/api/drive/transfer-token', json=stale)).status_code == 409
+            assert (await client.post('/api/drive/reserve-id', json={**reservation, **stale})).status_code == 409
+            assert (await client.post('/api/drive/transfer-token', json=body,
+                headers={'Origin': 'https://untrusted.example'})).status_code == 403
+    asyncio.run(run())
 
 
 def test_connect_binds_identity_and_keeps_credentials_out_of_responses(monkeypatch):

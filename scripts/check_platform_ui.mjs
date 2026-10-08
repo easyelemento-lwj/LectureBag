@@ -28,6 +28,7 @@ await build({ entryPoints: ['src/main.tsx'], bundle: true, outfile: join(temp, '
             async start(){return {clientId:"mock-client",state:"mock-state",expiresIn:300}}
             async connect(){state={connected:true,revision:1,connectionId:"mock-connection",email:"drive@example.invalid"};return state}
             async disconnect(){state={connected:false,revision:2};return state}
+            async list(){return {files:[],nextCursor:null}}
           }`, loader: 'js' }));
     }
     b.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'auth'
@@ -112,6 +113,7 @@ try {
         assert.ok((await evaluate('document.body.innerText')).includes('자동 업로드는 아직 활성화되지 않았습니다'));
         await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.innerText==='Google Drive 연결').click()`);
         await wait(`document.body.innerText.includes('연결됨: drive@example.invalid')`);
+        await wait(`!!document.querySelector('[aria-label="시험 사진 선택"]')`);
         await evaluate(`window.confirm=()=>true; Array.from(document.querySelectorAll('button')).find(b=>b.innerText==='연결 해제').click()`);
         await wait(`document.body.innerText.includes('연결되지 않음')`);
         assert.equal(await evaluate(`Object.keys(localStorage).some(k=>/token|drive.*code/i.test(k))`), false);

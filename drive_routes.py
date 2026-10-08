@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Request, Query
+from fastapi import APIRouter, Depends, Request, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, AwareDatetime
 from redis.exceptions import RedisError
 from google.api_core.exceptions import GoogleAPIError
@@ -32,6 +32,16 @@ class DisconnectRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     connectionId: uuid.UUID
     revision: Annotated[int, Field(strict=True, ge=1)]
+
+
+class TransferRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    connectionId: uuid.UUID
+
+
+class ReserveRequest(TransferRequest):
+    key: str = Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')
+    candidate: str = Field(pattern=r'^[A-Za-z0-9_-]{1,200}$')
 
 
 class CommitRequest(BaseModel):
@@ -99,6 +109,34 @@ def create_drive_router(verify_user, firebase_app):
     async def status(context=Depends(deps)):
         uid, svc = context
         return public_state(await asyncio.to_thread(svc.catalog.get, uid))
+
+    @router.post('/drive/transfer-token')
+    async def transfer_token(body: TransferRequest, request: Request, response: Response, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        current = await asyncio.to_thread(svc.catalog.get, uid)
+        if not current['connected'] or current['connectionId'] != str(body.connectionId):
+            raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+        refresh = await svc.tokens.read(uid, current['connectionId'], current['tokenRef'])
+        token = await svc.google.refresh(refresh)
+        latest = await asyncio.to_thread(svc.catalog.get, uid)
+        if latest['revision'] != current['revision']:
+            raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Pragma'] = 'no-cache'
+        return {'accessToken': token['access_token'], 'expiresIn': token.get('expires_in', 300),
+                'ownerHash': hashlib.sha256(uid.encode()).hexdigest()}
+
+    @router.post('/drive/reserve-id')
+    async def reserve_id(body: ReserveRequest, request: Request, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        current = await asyncio.to_thread(svc.catalog.get, uid)
+        if not current['connected'] or current['connectionId'] != str(body.connectionId):
+            raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+        key = hashlib.sha256(f'{body.connectionId}:{body.key}'.encode()).hexdigest()
+        value = await asyncio.to_thread(svc.catalog.reserve_id, uid, current, key, body.candidate)
+        return {'id': value}
 
     @router.post('/drive/auth/start')
     async def start(request: Request, context=Depends(deps)):

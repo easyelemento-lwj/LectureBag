@@ -68,6 +68,34 @@ export class DriveClient {
     return validId(data.ids?.[0] || '');
   }
 
+  async metadata(id: string, signal?: AbortSignal): Promise<RemoteFile & { trashed?: boolean; appProperties?: Record<string, string> }> {
+    return (await this.request(`${DRIVE_API}/files/${validId(id)}?fields=id,size,mimeType,sha256Checksum,trashed,appProperties`, { signal })).json();
+  }
+
+  async folder(id: string, name: string, properties: Record<string, string>, parentId?: string, signal?: AbortSignal) {
+    try {
+      const existing = await this.metadata(id, signal);
+      if (existing.trashed || existing.mimeType !== 'application/vnd.google-apps.folder' ||
+        Object.entries(properties).some(([key, value]) => existing.appProperties?.[key] !== value)) throw new DriveTransferError('failed');
+      return;
+    } catch (error) { if (!(error instanceof DriveTransferError) || error.code !== 'not_found') throw error; }
+    try {
+      await this.request(`${DRIVE_API}/files?fields=id`, { method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: validId(id), name,
+          mimeType: 'application/vnd.google-apps.folder', appProperties: properties,
+          ...(parentId ? { parents: [validId(parentId)] } : {}) }) });
+    } catch (error) {
+      // A concurrent creator or lost response may already have created this reserved ID.
+      const existing = await this.metadata(id, signal);
+      if (existing.trashed || existing.mimeType !== 'application/vnd.google-apps.folder' ||
+        Object.entries(properties).some(([key, value]) => existing.appProperties?.[key] !== value)) throw error;
+    }
+  }
+
+  async download(id: string, signal?: AbortSignal): Promise<Blob> {
+    return (await this.request(`${DRIVE_API}/files/${validId(id)}?alt=media`, { signal })).blob();
+  }
+
   async startUpload(metadata: { id: string; name: string; mimeType: string; parentId: string; appProperties: Record<string, string> },
     sizeBytes: number, signal?: AbortSignal) {
     if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) throw new DriveTransferError('failed');

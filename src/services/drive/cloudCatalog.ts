@@ -49,6 +49,12 @@ export class CloudCatalog {
   }
 
   status(signal?: AbortSignal) { return this.request<DriveConnection>('/api/drive/status', undefined, signal); }
+  transferToken(connectionId: string, signal?: AbortSignal) {
+    return this.request<{ accessToken: string; expiresIn: number; ownerHash: string }>('/api/drive/transfer-token', { connectionId }, signal);
+  }
+  reserveId(connectionId: string, key: string, candidate: string, signal?: AbortSignal) {
+    return this.request<{ id: string }>('/api/drive/reserve-id', { connectionId, key, candidate }, signal);
+  }
   start(signal?: AbortSignal) { return this.request<DriveAuthChallenge>('/api/drive/auth/start', {}, signal); }
   connect(code: string, state: string, signal?: AbortSignal) {
     return this.request<DriveConnection>('/api/drive/connect', { code, state }, signal);

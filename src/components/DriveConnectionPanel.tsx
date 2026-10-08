@@ -4,6 +4,7 @@ import { auth } from '../utils/firebase';
 import { CloudCatalog } from '../services/drive/cloudCatalog';
 import { loadDriveOAuth, requestDriveCode } from '../services/drive/driveAuth';
 import type { DriveAuthChallenge, DriveConnection } from '../services/drive/types';
+import { DrivePhotoTrial } from './DrivePhotoTrial';
 
 export function DriveConnectionPanel() {
   const { user } = useAuth();
@@ -76,5 +77,7 @@ function DriveConnectionSession({ user }: { user: NonNullable<ReturnType<typeof 
       <button type="button" disabled={busy} onClick={() => setAttempt(n => n + 1)}
         className="px-3 py-2 rounded-xl bg-neutral-100 text-xs disabled:opacity-40">새로고침</button>
     </div>
+    {connection?.connected && connection.connectionId && !busy && <DrivePhotoTrial key={`${user.uid}:${connection.connectionId}`}
+      catalog={catalog} uid={user.uid} connectionId={connection.connectionId} />}
   </section>;
 }

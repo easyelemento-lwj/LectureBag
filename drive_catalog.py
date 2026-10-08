@@ -35,6 +35,21 @@ class DriveCatalog:
     def get(self, uid):
         return self.reference(uid).get().to_dict() or empty_state()
 
+    def reserve_id(self, uid, connection, key, candidate):
+        ref = self.reference(uid).parent.parent.collection('cloudOperations').document(key)
+
+        @firestore.transactional
+        def reserve(tx):
+            current = self.reference(uid).get(transaction=tx).to_dict() or empty_state()
+            saved = ref.get(transaction=tx).to_dict()
+            if not current['connected'] or current['revision'] != connection['revision']:
+                raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+            if saved:
+                return saved['driveFileId']
+            tx.set(ref, {'driveFileId': candidate, 'connectionId': connection['connectionId']})
+            return candidate
+        return reserve(self.db.transaction())
+
     def replace(self, uid, expected_revision, next_state):
         ref = self.reference(uid)
 
