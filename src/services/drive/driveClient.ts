@@ -35,7 +35,8 @@ function validId(id: string) {
 }
 
 export class DriveClient {
-  constructor(private accessToken: () => Promise<string>, private fetcher: typeof fetch = fetch) {}
+  // Native browser fetch must retain its Window receiver, not this DriveClient.
+  constructor(private accessToken: () => Promise<string>, private fetcher: typeof fetch = (input, init) => globalThis.fetch(input, init)) {}
 
   private async request(url: string, init: RequestInit, allowIncomplete = false): Promise<Response> {
     init.signal?.throwIfAborted();

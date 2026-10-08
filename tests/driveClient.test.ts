@@ -53,3 +53,12 @@ test('aborted identity scope never starts a request after token resolution', asy
   });
   await assert.rejects(client.generateId(controller.signal));
 });
+test('default transport preserves the global receiver required by browser fetch', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async function () {
+    assert.equal(this, globalThis);
+    return Response.json({ ids: ['generated-id'] });
+  };
+  try { assert.equal(await new DriveClient(async () => 'synthetic').generateId(), 'generated-id'); }
+  finally { globalThis.fetch = original; }
+});
