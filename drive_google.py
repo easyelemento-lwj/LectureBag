@@ -21,7 +21,7 @@ async def google_request(method, url, *, oauth_token_exchange=False, **kwargs):
         async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
             response = await client.request(method, url, **kwargs)
         if response.status_code >= 400:
-            if oauth_token_exchange and response.status_code == 400:
+            if oauth_token_exchange and response.status_code in (400, 401):
                 # OAuth error identifiers are standardized and safe to classify;
                 # do not expose descriptions, codes, tokens, or response bodies.
                 error = response.json().get('error') if response.content else ''

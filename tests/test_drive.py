@@ -319,6 +319,20 @@ def test_oauth_exchange_classifies_safe_standard_errors(monkeypatch, upstream, e
     asyncio.run(run())
 
 
+def test_oauth_exchange_classifies_invalid_client_returned_as_401(monkeypatch):
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def request(self, *args, **kwargs): return httpx.Response(401, json={'error': 'invalid_client'})
+    monkeypatch.setattr(drive_google.httpx, 'AsyncClient', Client)
+    async def run():
+        with pytest.raises(HTTPException) as exc:
+            await drive_google.google_request('POST', 'https://oauth2.googleapis.com/token', oauth_token_exchange=True)
+        assert exc.value.detail == {'code': 'DRIVE_OAUTH_CLIENT_REJECTED'}
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('claims,expected', [
     ({'sub': 'person', 'email_verified': True}, None),
     ({'sub': 'person', 'email_verified': False}, 401),
