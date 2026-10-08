@@ -1,6 +1,16 @@
 import { createStore, get } from 'idb-keyval';
 import type { TrashEntry } from './trash';
 import { purgeExpiredTrash } from './trash';
+import type { CapturedPhoto } from '../types';
+
+export interface CaptureIntent {
+  fileId: string;
+  name: string;
+  capturedAt: string;
+  folderPath: string[];
+  connectionId?: string;
+}
+const capturesKey = (uid: string) => `lecturebag_capture_outbox_${uid}`;
 
 const store = createStore('keyval-store', 'keyval');
 export const trashKey = (uid: string) => `lecture_snap_trash_${uid}`;
@@ -60,4 +70,39 @@ export async function loadImportedMedia<T extends { id: string }>(uid: string): 
   ]);
   const purged = new Set(entries.filter(entry => entry.purged).map(entry => entry.file.id));
   return files.filter(file => !purged.has(file.id));
+}
+
+/** Camera source and durable upload intent commit together, or neither commits. */
+export function saveCapturedPhoto(uid: string, photo: CapturedPhoto, intent?: CaptureIntent): Promise<void> {
+  if (!uid || (intent && intent.fileId !== photo.id)) throw new Error('촬영 계정과 파일이 일치하지 않습니다.');
+  const keys = [trashKey(uid), sourceKey(uid, 'photos'), capturesKey(uid)];
+  return transaction(keys, ([entries = [], photos = [], intents = []], objectStore) => {
+    if (entries.some((entry: TrashEntry) => entry.file.id === photo.id) ||
+      photos.some((saved: CapturedPhoto) => saved.id === photo.id)) throw new Error('이미 저장되거나 삭제된 사진입니다.');
+    objectStore.put([photo, ...photos], keys[1]);
+    if (intent) objectStore.put([...intents, intent], keys[2]);
+  });
+}
+
+export async function captureIntents(uid: string): Promise<CaptureIntent[]> {
+  return await get<CaptureIntent[]>(capturesKey(uid), store) ?? [];
+}
+
+/** Bind once: old connection generations are never silently moved to a new Drive. */
+export function bindCapture(uid: string, fileId: string, connectionId: string): Promise<CaptureIntent> {
+  const key = capturesKey(uid);
+  return transaction([key], ([intents = []], objectStore) => {
+    const intent = intents.find((item: CaptureIntent) => item.fileId === fileId);
+    if (!intent || (intent.connectionId && intent.connectionId !== connectionId)) throw new Error('촬영 자료의 연결이 변경되었습니다.');
+    const bound = { ...intent, connectionId };
+    objectStore.put(intents.map((item: CaptureIntent) => item.fileId === fileId ? bound : item), key);
+    return bound;
+  });
+}
+
+export function captureSource(uid: string, fileId: string): Promise<CapturedPhoto | undefined> {
+  return transaction([trashKey(uid), sourceKey(uid, 'photos')], ([entries = [], photos = []]) => {
+    if (entries.some((entry: TrashEntry) => entry.file.id === fileId && (!entry.restored || entry.purged))) return undefined;
+    return photos.find((photo: CapturedPhoto) => photo.id === fileId);
+  });
 }

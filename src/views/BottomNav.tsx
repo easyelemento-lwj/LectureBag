@@ -17,6 +17,7 @@ interface BottomNavProps {
   isPaused: boolean;
   photos: CapturedPhoto[];
   recordings: RecordedAudio[];
+  captureDisabled?: boolean;
 
   onTakeSnapshot: () => void;
   onStartRecording: (e?: React.MouseEvent) => void;
@@ -33,6 +34,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   isPaused,
   photos,
   recordings,
+  captureDisabled,
   onTakeSnapshot,
   onStartRecording,
   onTogglePauseRecording,
@@ -165,8 +167,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       {/* Shutter */}
       <button
         data-tour="capture"
+        disabled={captureDisabled}
         onClick={onTakeSnapshot}
-        className="w-16 h-16 rounded-full bg-black text-white flex items-center justify-center shadow-lg active:scale-90 transition-all border-2 border-white ring-2 ring-neutral-200/60 p-0"
+        className="w-16 h-16 rounded-full bg-black text-white flex items-center justify-center shadow-lg active:scale-90 transition-all border-2 border-white ring-2 ring-neutral-200/60 p-0 disabled:opacity-40"
         title="카메라 촬영"
       >
         <div className="w-13 h-13 rounded-full border border-white/40 bg-white" />

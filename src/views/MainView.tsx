@@ -13,6 +13,7 @@ import { getAppCapabilities } from '../utils/appCapabilities';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppTutorial, tutorialSections, type TutorialSection } from '../components/AppTutorial';
 import { useAuth } from '../hooks/useAuth';
+import { useDriveSync } from '../context/DriveSyncContext';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useAppState } from '../models/useAppState';
@@ -26,6 +27,7 @@ export const MainView: React.FC = () => {
   const [capabilities] = useState(() => getAppCapabilities());
   const { canCapture } = capabilities;
   const state = useAppState(canCapture);
+  const driveSync = useDriveSync();
   const { user } = useAuth();
   const tourOwner = user?.uid ?? 'guest';
   const seenTours = useRef(new Set<TutorialSection>());
@@ -81,6 +83,10 @@ export const MainView: React.FC = () => {
 
   return (
     <div className="absolute inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
+      {state.captureError && <div role="alert" className="absolute top-16 left-4 right-4 z-[100] rounded-xl bg-red-950 p-3 text-sm">
+        <p>{state.captureError}</p>
+        {state.canRetryCaptureSave && <button type="button" onClick={state.retryCaptureSave} className="mt-2 underline">사진 저장 다시 시도</button>}
+      </div>}
 
       {/* Global Shutter Flash Animation */}
       <AnimatePresence>
@@ -121,6 +127,13 @@ export const MainView: React.FC = () => {
         onExitAudioMode={() => state.setIsAudioMode(false)}
       />
 
+      {driveSync.enabled && !state.isFolderExplorerOpen && !audioMode && <div aria-live="polite"
+        className="absolute left-3 bottom-28 z-20 max-w-[85%] rounded-lg bg-black/60 px-2 py-1 text-[11px] pointer-events-none">
+        {driveSync.error || (driveSync.busy ? '사진을 기기에 저장했습니다 · Drive 업로드 중…'
+          : driveSync.connection?.connected ? `Drive 자동 업로드 · 완료 ${driveSync.jobs.filter(job => job.state === 'synced').length}개 / 대기 ${driveSync.jobs.filter(job => !['synced', 'cancelled'].includes(job.state)).length + driveSync.waiting}개`
+          : '사진은 기기에 저장됩니다 · 앱 센터에서 Drive 연결을 확인해 주세요.')}
+      </div>}
+
       {/* ── Floating Bottom Navigation Bar ── */}
       <div
         className="absolute left-1/2 -translate-x-1/2 z-30"
@@ -132,6 +145,7 @@ export const MainView: React.FC = () => {
           isPaused={paused}
           photos={state.photos}
           recordings={state.recordings}
+          captureDisabled={state.captureDisabled}
           onTakeSnapshot={state.handleTakeSnapshot}
           onStartRecording={state.handleStartRecording}
           onTogglePauseRecording={state.handleTogglePauseRecording}

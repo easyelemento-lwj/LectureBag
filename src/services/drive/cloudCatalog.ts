@@ -18,6 +18,12 @@ const messages: Record<string, string> = {
   DRIVE_RATE_LIMITED: '요청이 많습니다. 잠시 후 다시 시도해 주세요.',
 };
 
+export class CatalogError extends Error {
+  constructor(public code: string, public retryable: boolean) {
+    super(messages[code] || 'Drive 요청을 완료하지 못했습니다. 다시 시도해 주세요.');
+  }
+}
+
 /** One client belongs to one Firebase user; late responses can never switch owners. */
 export class CloudCatalog {
   constructor(private user: User, private currentUid: () => string | undefined,
@@ -44,7 +50,7 @@ export class CloudCatalog {
     });
     const data = await response.json().catch(() => null);
     checkUser();
-    if (!response.ok) throw new Error(messages[data?.detail?.code] || 'Drive 요청을 완료하지 못했습니다. 다시 시도해 주세요.');
+    if (!response.ok) throw new CatalogError(data?.detail?.code || 'DRIVE_REQUEST_FAILED', response.status === 429 || response.status >= 500);
     return data as T;
   }
 

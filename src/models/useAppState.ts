@@ -8,10 +8,11 @@ import { cameraFrame } from '../utils/cameraFrame';
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { CapturedPhoto, FlashMode, RecordedAudio, TimetableEntry, AspectRatio } from '../types';
-import { saveMedia } from '../utils/mediaStorage';
+import { saveMedia, saveCapturedPhoto, type CaptureIntent } from '../utils/mediaStorage';
+import { useDriveSync } from '../context/DriveSyncContext';
 import { accountKey } from '../utils/accountStorage';
 import { useTrash } from '../context/TrashContext';
-import { getSampleMediaFiles } from '../utils/dateFolders';
+import { getSampleMediaFiles, getFolderHierarchyFromDate, formatFileName as captureFileName } from '../utils/dateFolders';
 import { playShutterSound } from '../utils/audio';
 import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
 import { useDeviceType } from '../hooks/useDeviceType';
@@ -42,6 +43,7 @@ function formatFileName(date: Date | string): string {
 
 export function useAppState(canCapture: boolean) {
   const { user } = useAuth();
+  const driveSync = useDriveSync();
   const uid = user?.uid ?? 'guest';
   const { entries: trashEntries, moveToTrash } = useTrash();
   const purgedIds = useMemo(() => new Set(trashEntries.filter(entry => entry.purged).map(entry => entry.file.id)), [trashEntries]);
@@ -95,6 +97,32 @@ export function useAppState(canCapture: boolean) {
 
   // ── Photos ─────────────────────────────────────────────────────────────
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
+  const [captureError, setCaptureError] = useState('');
+  const unsavedCapture = useRef<{ photo: CapturedPhoto; intent?: CaptureIntent } | null>(null);
+  const captureSaving = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const persistCapture = async (photo: CapturedPhoto, intent?: CaptureIntent) => {
+    if (!user) return;
+    unsavedCapture.current = { photo, intent };
+    try {
+      await saveCapturedPhoto(user.uid, photo, intent);
+      if (!mounted.current) return;
+      unsavedCapture.current = null;
+      setCaptureError('');
+      setPhotos(prev => [photo, ...prev]);
+      setSelectedPhotoIds(prev => [...prev, photo.id]);
+      driveSync.wake();
+    } catch {
+      if (mounted.current) setCaptureError('기기에 사진을 저장하지 못했습니다. 화면을 닫지 말고 저장 공간을 확보한 뒤 다시 시도해 주세요.');
+    }
+  };
+  const retryCaptureSave = async () => {
+    if (captureSaving.current || !unsavedCapture.current) return;
+    captureSaving.current = true;
+    try { await persistCapture(unsavedCapture.current.photo, unsavedCapture.current.intent); }
+    finally { captureSaving.current = false; }
+  };
 
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
 
@@ -424,84 +452,94 @@ export function useAppState(canCapture: boolean) {
     }
   }, [photos, moveToTrash]);
 
-  const handleTakeSnapshot = useCallback(() => {
-    if (!canCapture || isCapturing) return;
+  const handleTakeSnapshot = async () => {
+    if (!canCapture || isCapturing || !user || !isDataLoaded || captureSaving.current || unsavedCapture.current) return;
+    if (cameraStatus !== 'live' || !videoRef.current || videoRef.current.readyState < 2) {
+      setCaptureError('카메라가 아직 준비되지 않았습니다. 카메라 권한을 확인한 뒤 다시 촬영해 주세요.');
+      return;
+    }
+    captureSaving.current = true;
     setIsCapturing(true);
-    playShutterSound();
-    setShutterFlash(true);
-    setTimeout(() => setShutterFlash(false), 150);
+    try {
+      playShutterSound();
+      setShutterFlash(true);
+      setTimeout(() => setShutterFlash(false), 150);
 
-    const canvas = document.createElement('canvas');
-    const video = videoRef.current;
-    let dataUrl = '';
+      const canvas = document.createElement('canvas');
+      const video = videoRef.current;
+      let dataUrl = '';
 
-    // Match the visible crop, including landscape and installed-app viewport size.
-    const bounds = video?.parentElement?.getBoundingClientRect();
-    const frame = cameraFrame(bounds?.width || window.innerWidth, bounds?.height || window.innerHeight, aspectRatio);
-    const scale = 1920 / Math.max(frame.width, frame.height);
-    const width = Math.max(1, Math.round(frame.width * scale));
-    const height = Math.max(1, Math.round(frame.height * scale));
+      // Match the visible crop, including landscape and installed-app viewport size.
+      const bounds = video?.parentElement?.getBoundingClientRect();
+      const frame = cameraFrame(bounds?.width || window.innerWidth, bounds?.height || window.innerHeight, aspectRatio);
+      const scale = 1920 / Math.max(frame.width, frame.height);
+      const width = Math.max(1, Math.round(frame.width * scale));
+      const height = Math.max(1, Math.round(frame.height * scale));
 
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
 
-    if (video && cameraStatus === 'live' && video.readyState >= 2) {
-      if (ctx) {
-        if (cameraFacing === 'front') {
-          ctx.translate(canvas.width, 0);
-          ctx.scale(-1, 1);
+      if (video && cameraStatus === 'live' && video.readyState >= 2) {
+        if (ctx) {
+          if (cameraFacing === 'front') {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+          }
+          // Center-crop video to aspect ratio dimensions
+          const vW = video.videoWidth || 1280;
+          const vH = video.videoHeight || 720;
+          const targetRatio = width / height;
+          const srcRatio = vW / vH;
+
+          let sW = vW;
+          let sH = vH;
+          let sX = 0;
+          let sY = 0;
+
+          if (srcRatio > targetRatio) {
+            sW = vH * targetRatio;
+            sX = (vW - sW) / 2;
+          } else {
+            sH = vW / targetRatio;
+            sY = (vH - sH) / 2;
+          }
+
+          ctx.drawImage(video, sX, sY, sW, sH, 0, 0, canvas.width, canvas.height);
+          dataUrl = compressImage(canvas);
         }
-        // Center-crop video to aspect ratio dimensions
-        const vW = video.videoWidth || 1280;
-        const vH = video.videoHeight || 720;
-        const targetRatio = width / height;
-        const srcRatio = vW / vH;
-
-        let sW = vW;
-        let sH = vH;
-        let sX = 0;
-        let sY = 0;
-
-        if (srcRatio > targetRatio) {
-          sW = vH * targetRatio;
-          sX = (vW - sW) / 2;
-        } else {
-          sH = vW / targetRatio;
-          sY = (vH - sH) / 2;
-        }
-
-        ctx.drawImage(video, sX, sY, sW, sH, 0, 0, canvas.width, canvas.height);
-        dataUrl = compressImage(canvas);
       }
-    } else {
-      // Camera offline fallback: Fill snapshot with solid black
-      if (ctx) {
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, width, height);
-        dataUrl = compressImage(canvas);
+
+      if (!dataUrl) throw new Error('Capture failed');
+      if (dataUrl) {
+        const now = new Date();
+        const fileName = formatFileName(now);
+        const newPhoto: CapturedPhoto = {
+          id: crypto.randomUUID(),
+          dataUrl,
+          timestamp: now,
+          mode: 'PPT/판서',
+          width: canvas.width,
+          height: canvas.height,
+          folderName: fileName,
+        };
+        const hierarchy = getFolderHierarchyFromDate(now, undefined, timetables);
+        const extension = dataUrl.startsWith('data:image/webp;') ? 'webp' : dataUrl.startsWith('data:image/png;') ? 'png' : 'jpg';
+        await persistCapture(newPhoto, driveSync.enabled ? {
+          fileId: newPhoto.id, name: `${captureFileName(now)}_${newPhoto.id.slice(0, 8)}.${extension}`,
+          capturedAt: now.toISOString(), connectionId: driveSync.connection?.connected ? driveSync.connection.connectionId : undefined,
+          folderPath: storageMode === 'timetable'
+            ? [hierarchy.year, hierarchy.semester, hierarchy.subject, hierarchy.month, hierarchy.day]
+            : [hierarchy.year, hierarchy.halfYear, hierarchy.month, hierarchy.day],
+        } : undefined);
       }
+    } catch {
+      if (mounted.current) setCaptureError('사진을 만들지 못했습니다. 카메라 상태와 저장 공간을 확인해 주세요.');
+    } finally {
+      captureSaving.current = false;
+      if (mounted.current) setIsCapturing(false);
     }
-
-    if (dataUrl) {
-      const now = new Date();
-      const fileName = formatFileName(now);
-      const newPhoto: CapturedPhoto = {
-        id: `photo_${now.getTime()}_${Math.floor(Math.random() * 1000)}`,
-        dataUrl,
-        timestamp: now,
-        mode: 'PPT/판서',
-        width: canvas.width,
-        height: canvas.height,
-        folderName: fileName,
-      };
-      setPhotos((prev) => [newPhoto, ...prev]);
-      setSelectedPhotoIds((prev) => [...prev, newPhoto.id]);
-    }
-
-    setIsCapturing(false);
-    showToast('강의 사진이 촬영되어 저장되었습니다');
-  }, [canCapture, isCapturing, cameraStatus, cameraFacing, aspectRatio, showToast]);
+  };
 
   const toggleAspectRatio = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -542,7 +580,8 @@ export function useAppState(canCapture: boolean) {
     photos: photos.filter(photo => !trashedIds.has(photo.id)), setPhotos,
     selectedPhotoIds, setSelectedPhotoIds,
     handleDeletePhoto, handleTakeSnapshot,
-    isCapturing, shutterFlash,
+    isCapturing, shutterFlash, captureError, retryCaptureSave, canRetryCaptureSave: !!unsavedCapture.current,
+    captureDisabled: !isDataLoaded || isCapturing || !!unsavedCapture.current,
     recordings: recordings.filter(recording => !trashedIds.has(recording.id)),
     handleDeleteRecording, handleStartRecording,
     handleTogglePauseRecording, handleStopRecording,

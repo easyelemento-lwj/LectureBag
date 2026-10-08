@@ -19,16 +19,21 @@ await build({ entryPoints: ['src/main.tsx'], bundle: true, outfile: join(temp, '
     b.onResolve({ filter: /\/firebase(?:\.ts)?$/ }, () => ({ path: 'firebase', namespace: 'fixture' }));
     b.onResolve({ filter: /\.css$/ }, () => ({ path: 'style', namespace: 'fixture' }));
     if (drivePreview) {
-      b.onResolve({ filter: /services\/drive\/cloudCatalog$/ }, () => ({ path: 'catalog', namespace: 'drive-fixture' }));
+      b.onResolve({ filter: /(?:^|\/)cloudCatalog$/ }, () => ({ path: 'catalog', namespace: 'drive-fixture' }));
       b.onResolve({ filter: /services\/drive\/driveAuth$/ }, () => ({ path: 'oauth', namespace: 'drive-fixture' }));
       b.onLoad({ filter: /.*/, namespace: 'drive-fixture' }, ({ path }) => ({ contents: path === 'oauth'
         ? `export const loadDriveOAuth=async()=>({}); export const requestDriveCode=async()=>"mock-code";`
-        : `let state={connected:false,revision:0}; export class CloudCatalog {
+        : `let state=window.__driveAuto ? {connected:true,revision:1,connectionId:"mock-connection",email:"drive@example.invalid"} : {connected:false,revision:0};
+          const records=[], reserved=new Map(); export class CatalogError extends Error {}
+          export class CloudCatalog {
             async status(){return state}
             async start(){return {clientId:"mock-client",state:"mock-state",expiresIn:300}}
             async connect(){state={connected:true,revision:1,connectionId:"mock-connection",email:"drive@example.invalid"};return state}
             async disconnect(){state={connected:false,revision:2};return state}
-            async list(){return {files:[],nextCursor:null}}
+            async list(folder){return {files:records.filter(r=>r.logicalFolderId===folder),nextCursor:null}}
+            async transferToken(){return {accessToken:"synthetic",ownerHash:"owner",expiresIn:3600}}
+            async reserveId(conn,key,candidate){if(!reserved.has(key))reserved.set(key,candidate); return {id:reserved.get(key)}}
+            async commit(record){records.push(record);window.driveTransfers.commits++;return record}
           }`, loader: 'js' }));
     }
     b.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'auth'
@@ -88,10 +93,38 @@ try {
     await command('Emulation.setUserAgentOverride', { userAgent: scenario.ua, platform: scenario.platform });
     await command('Emulation.setDeviceMetricsOverride', { width: scenario.width, height: scenario.height, deviceScaleFactor: 1, mobile: scenario.capture });
     await command('Page.addScriptToEvaluateOnNewDocument', { source: `
+      window.__driveAuto=${drivePreview && scenario.capture};
+      window.driveTransfers={starts:0,chunks:0,commits:0};
+      if(window.__driveAuto){
+        const realFetch=window.fetch.bind(window), files=new Map(); let serial=0, metadata;
+        window.fetch=async (input,init)=>{
+          const url=new URL(String(input),location.href);
+          if(url.hostname!=='www.googleapis.com')return realFetch(input,init);
+          if(init?.headers?.Authorization!=='Bearer synthetic')throw new Error('Unexpected credential');
+          if(url.pathname.endsWith('/generateIds'))return Response.json({ids:['synthetic-'+(++serial)]});
+          if(url.pathname.startsWith('/upload/')){
+            if(init.method==='POST'){
+              window.driveTransfers.starts++;metadata=JSON.parse(init.body);
+              return new Response(null,{headers:{Location:'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=synthetic'}});
+            }
+            window.driveTransfers.chunks++;
+            const checksum=[...new Uint8Array(await crypto.subtle.digest('SHA-256',await init.body.arrayBuffer()))].map(n=>n.toString(16).padStart(2,'0')).join('');
+            const file={...metadata,size:String(init.body.size),sha256Checksum:checksum};files.set(file.id,file);return Response.json(file);
+          }
+          if(init.method==='POST'){const file=JSON.parse(init.body);files.set(file.id,file);return Response.json({id:file.id})}
+          const file=files.get(url.pathname.split('/').at(-1));return file?Response.json(file):new Response(null,{status:404});
+        };
+      }
       Object.defineProperty(navigator,'maxTouchPoints',{value:${scenario.touch}});
       Object.defineProperty(navigator,'userAgentData',{value:undefined});
       Object.defineProperty(navigator,'standalone',{value:${!!scenario.standalone}});
-      window.mediaCalls=[]; navigator.mediaDevices.getUserMedia=async c=>{window.mediaCalls.push(c); throw new DOMException('Test denied','NotAllowedError')};
+      window.mediaCalls=[]; navigator.mediaDevices.getUserMedia=async c=>{
+        window.mediaCalls.push(c);
+        if(window.__driveAuto && c.video){const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;
+          const ctx=canvas.getContext('2d');ctx.fillStyle='#14532d';ctx.fillRect(0,0,640,480);ctx.fillStyle='white';ctx.font='30px sans-serif';ctx.fillText('Synthetic lecture frame',40,180);
+          return canvas.captureStream(5)}
+        throw new DOMException('Test denied','NotAllowedError')
+      };
       localStorage.clear();
       localStorage.setItem('lecturebag_app_tutorial_v4:platform-test:apps','seen');
     ` });
@@ -102,6 +135,36 @@ try {
     await wait('!document.querySelector("dialog[open]")');
     assert.equal(await evaluate('!!document.querySelector("video")'), scenario.capture);
     assert.equal((await evaluate('window.mediaCalls.length')) > 0, scenario.capture);
+    if (drivePreview && scenario.capture) {
+      await wait(`document.body.innerText.includes('Drive 자동 업로드')`);
+      await wait(`document.querySelector('video')?.readyState>=2`);
+      await wait(`document.querySelector('[data-tour="capture"]')?.disabled===false`);
+      if (scenario.name === 'phone') {
+        await command('Network.enable');
+        await command('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 });
+      }
+      await evaluate(`document.querySelector('[data-tour="capture"]').click()`);
+      if (scenario.name === 'phone') {
+        await wait(`document.body.innerText.includes('오프라인 · 사진은 기기에 보관됩니다.')`);
+        assert.equal(await evaluate('window.driveTransfers.starts'), 0);
+        await command('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      }
+      try { await wait(`window.driveTransfers.commits===1`); }
+      catch(error) {
+        console.log(scenario.name, await evaluate(`({text:document.body.innerText,transfers:window.driveTransfers})`));
+        throw error;
+      }
+      await wait(`document.body.innerText.includes('대기 0개')`);
+      assert.deepEqual(await evaluate('window.driveTransfers'), { starts: 1, chunks: 1, commits: 1 });
+      const stored = await evaluate(`new Promise((resolve,reject)=>{const r=indexedDB.open('keyval-store');r.onsuccess=()=>{const g=r.result.transaction('keyval').objectStore('keyval').get('lecture_snap_photos_platform-test');g.onsuccess=()=>resolve(g.result.length);g.onerror=reject}})`);
+      assert.ok(stored > 0, 'automatic upload must keep local camera originals');
+      await command('Page.reload');
+      await wait(`document.querySelector('[aria-label="튜토리얼 닫기"]')`);
+      await evaluate(`document.querySelector('[aria-label="튜토리얼 닫기"]').click()`);
+      await wait(`document.body.innerText.includes('Drive 자동 업로드')`);
+      assert.equal(await evaluate('window.driveTransfers.starts'), 0, 'completed capture must not upload again after reload');
+      console.log(`PASS ${scenario.name}: camera -> durable source/outbox -> automatic upload/commit; reload does not duplicate`);
+    }
     await command('Emulation.setDeviceMetricsOverride', { width: scenario.height, height: scenario.width, deviceScaleFactor: 1, mobile: scenario.capture });
     assert.equal(await evaluate('!!document.querySelector("video")'), scenario.capture);
     if (!scenario.capture) {
@@ -110,7 +173,7 @@ try {
       await wait(`document.body.innerText.includes('APP CENTRE')`);
       if (drivePreview) {
         await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.innerText==='Google Drive 연결' && !b.disabled)`);
-        assert.ok((await evaluate('document.body.innerText')).includes('자동 업로드는 아직 활성화되지 않았습니다'));
+        assert.ok((await evaluate('document.body.innerText')).includes('새로 촬영한 사진은 앱이 열려 있는 동안 자동 업로드'));
         await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.innerText==='Google Drive 연결').click()`);
         await wait(`document.body.innerText.includes('연결됨: drive@example.invalid')`);
         await wait(`!!document.querySelector('[aria-label="시험 사진 선택"]')`);

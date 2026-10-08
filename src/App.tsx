@@ -8,6 +8,7 @@ import { MainView } from './views/MainView';
 import { AccentColorProvider } from './context/AccentColorContext';
 import { AuthProvider } from './context/AuthContext';
 import { AuthGate } from './components/AuthGate';
+import { DriveSyncProvider } from './context/DriveSyncContext';
 
 export default function App() {
   return (
@@ -15,12 +16,11 @@ export default function App() {
       <AccentColorProvider>
         <div className="absolute inset-0 w-full h-full bg-black font-sans antialiased select-none overflow-hidden">
           <AuthGate>
-            <TrashProvider><MainView /></TrashProvider>
+            <TrashProvider><DriveSyncProvider><MainView /></DriveSyncProvider></TrashProvider>
           </AuthGate>
         </div>
       </AccentColorProvider>
     </AuthProvider>
   );
 }
-
 

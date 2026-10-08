@@ -177,11 +177,12 @@ export class UploadQueue {
     }
   }
 
-  renew(fileId: string, token: string, revision: number) {
+  renew(fileId: string, token: string, revision: number, leaseMs = 60_000) {
+    if (leaseMs < 1000 || leaseMs > 300_000) throw new Error('잘못된 잠금 시간입니다.');
     return this.store.update(uploadKey(this.identity, fileId), current => {
       const job = this.require(current);
       this.checkLease(job, token, revision);
-      return { ...job, revision: job.revision + 1, lease: { token, expiresAt: this.now() + 60_000 } };
+      return { ...job, revision: job.revision + 1, lease: { token, expiresAt: this.now() + leaseMs } };
     });
   }
 

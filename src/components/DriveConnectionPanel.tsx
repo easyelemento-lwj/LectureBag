@@ -5,6 +5,8 @@ import { CloudCatalog } from '../services/drive/cloudCatalog';
 import { loadDriveOAuth, requestDriveCode } from '../services/drive/driveAuth';
 import type { DriveAuthChallenge, DriveConnection } from '../services/drive/types';
 import { DrivePhotoTrial } from './DrivePhotoTrial';
+import { DriveCaptureStatus } from './DriveCaptureStatus';
+import { notifyDriveChanged } from '../context/DriveSyncContext';
 
 export function DriveConnectionPanel() {
   const { user } = useAuth();
@@ -44,7 +46,7 @@ function DriveConnectionSession({ user }: { user: NonNullable<ReturnType<typeof 
     try {
       const code = await requestDriveCode(challenge, signal);
       const result = await catalog.connect(code, challenge.state, signal);
-      if (!signal.aborted) { setConnection(result); setChallenge(undefined); }
+      if (!signal.aborted) { setConnection(result); setChallenge(undefined); notifyDriveChanged(user.uid); }
     } catch (err) {
       if (!signal.aborted) { setChallenge(undefined); setError((err as Error).message); }
     } finally { if (!signal.aborted) setBusy(false); }
@@ -57,14 +59,14 @@ function DriveConnectionSession({ user }: { user: NonNullable<ReturnType<typeof 
     setBusy(true); setError('');
     try {
       await catalog.disconnect(connection, signal);
-      if (!signal.aborted) setAttempt(n => n + 1);
+      if (!signal.aborted) { notifyDriveChanged(user.uid); setAttempt(n => n + 1); }
     } catch (err) { if (!signal.aborted) setError((err as Error).message); }
     finally { if (!signal.aborted) setBusy(false); }
   }
 
   return <section className="bg-white border border-neutral-200 rounded-2xl p-4 text-neutral-900 space-y-3" aria-label="Google Drive 연결 시험">
     <h3 className="font-bold text-sm">Google Drive · 내부 연결 시험</h3>
-    <p className="text-xs text-neutral-500">연결·계정 검증을 위한 개발 화면입니다. 촬영 자료 자동 업로드는 아직 활성화되지 않았습니다.</p>
+    <p className="text-xs text-neutral-500">내부 시험용입니다. 새로 촬영한 사진은 앱이 열려 있는 동안 자동 업로드합니다. 녹음·네이티브 백그라운드 전송은 아직 포함되지 않습니다.</p>
     <p className="text-sm">{connection?.connected ? `연결됨: ${connection.email}` : '연결되지 않음'}</p>
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
     <div className="flex flex-wrap gap-2">
@@ -77,7 +79,9 @@ function DriveConnectionSession({ user }: { user: NonNullable<ReturnType<typeof 
       <button type="button" disabled={busy} onClick={() => setAttempt(n => n + 1)}
         className="px-3 py-2 rounded-xl bg-neutral-100 text-xs disabled:opacity-40">새로고침</button>
     </div>
-    {connection?.connected && connection.connectionId && !busy && <DrivePhotoTrial key={`${user.uid}:${connection.connectionId}`}
-      catalog={catalog} uid={user.uid} connectionId={connection.connectionId} />}
+    {connection?.connected && connection.connectionId && !busy && <>
+      <DriveCaptureStatus key={`captures:${user.uid}:${connection.connectionId}`} catalog={catalog} connectionId={connection.connectionId} />
+      <DrivePhotoTrial key={`${user.uid}:${connection.connectionId}`} catalog={catalog} uid={user.uid} connectionId={connection.connectionId} />
+    </>}
   </section>;
 }
