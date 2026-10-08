@@ -3,6 +3,13 @@
 업데이트: 2026-10-08. 내부 테스트 계정용 서버는 Railway에서 사용 중이며 공개 출시는 아니다.
 계획서의 A~F 완료 조건은 유지한다. 실기기 PoC를 통과했다고 표시하지 않는다.
 
+## Android 실제 기기 시험 준비 (2026-10-08)
+
+- 기존 공개 Hosting을 유지하고 7일짜리 `drive-mobile-test` 미리보기에 최신 프런트엔드를 배포했다.
+- 테스트 주소는 [실기기 시험 기록](GOOGLE_DRIVE_DEVICE_TEST.md)에 적었다. Google OAuth의 기존 localhost 등록은 유지하고 해당 시험 origin을 추가했다.
+- 서버 CORS와 Drive Origin 검증이 같은 `DRIVE_WEB_ORIGINS`의 정확한 목록을 사용하도록 연결했다. HTTPS 테스트 주소만 개별 허용하며 와일드카드·비보안 원격 origin은 거부한다.
+- 서버 테스트는 Origin 경계 3개를 포함해 61개 통과했다. 실제 Android 촬영 결과는 아직 사용자 시험 대기다.
+
 ## 새 촬영 사진의 웹 자동 업로드 (2026-10-08)
 
 - `VITE_DRIVE_INTERNAL_PREVIEW=true`인 내부 시험 앱의 신규 촬영만 대상으로 한다. 기존 사진을 스캔해 일괄 업로드하지 않는다. 녹음 업로드는 아직 연결하지 않았다.

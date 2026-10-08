@@ -18,6 +18,7 @@ from google.api_core.exceptions import GoogleAPIError
 from drive_catalog import DriveCatalog, public_state
 from drive_google import GoogleDrive, failure
 from drive_token_store import token_store
+from web_origins import drive_web_origins
 
 logger = logging.getLogger('lecturebag.drive')
 
@@ -78,7 +79,7 @@ async def services(firebase_app):
 
 def configured_origin(request):
     origin = request.headers.get('origin', '')
-    allowed = set(filter(None, os.environ.get('DRIVE_WEB_ORIGINS', '').split(',')))
+    allowed = drive_web_origins()
     parsed = urlsplit(origin)
     if origin not in allowed or parsed.path or parsed.query or parsed.fragment or parsed.username:
         raise failure(403, 'DRIVE_ORIGIN_DENIED')

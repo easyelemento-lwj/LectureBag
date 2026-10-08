@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
 from api_security import AiQuota, MAX_FILE_BYTES, RequestBoundary
 from drive_routes import create_drive_router
+from web_origins import cors_allowed_origins
 
 load_dotenv()
 logger = logging.getLogger('lecturebag.api')
@@ -28,8 +29,7 @@ logger.setLevel(logging.INFO)
 app = FastAPI(title='LectureBag API', docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(RequestBoundary)
 app.add_middleware(CORSMiddleware,
-    allow_origins=['https://lecturebag.web.app', 'https://lecturebag.firebaseapp.com',
-                   'http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173'],
+    allow_origins=cors_allowed_origins(),
     allow_credentials=False, allow_methods=['GET', 'POST'],
     allow_headers=['Content-Type', 'Authorization', 'X-Requested-With'], expose_headers=['X-Request-ID', 'Retry-After'])
 quota = AiQuota()
