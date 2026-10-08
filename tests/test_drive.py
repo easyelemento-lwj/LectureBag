@@ -300,6 +300,25 @@ def test_google_errors_never_expose_upstream_text(monkeypatch, caplog):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize('upstream,expected', [
+    ('invalid_client', 'DRIVE_OAUTH_CLIENT_REJECTED'),
+    ('invalid_grant', 'DRIVE_OAUTH_CODE_REJECTED'),
+])
+def test_oauth_exchange_classifies_safe_standard_errors(monkeypatch, upstream, expected):
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def request(self, *args, **kwargs):
+            return httpx.Response(400, json={'error': upstream, 'error_description': 'secret detail'})
+    monkeypatch.setattr(drive_google.httpx, 'AsyncClient', Client)
+    async def run():
+        with pytest.raises(HTTPException) as exc:
+            await drive_google.google_request('POST', 'https://oauth2.googleapis.com/token', oauth_token_exchange=True)
+        assert exc.value.detail == {'code': expected}
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('claims,expected', [
     ({'sub': 'person', 'email_verified': True}, None),
     ({'sub': 'person', 'email_verified': False}, 401),

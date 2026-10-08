@@ -15,12 +15,20 @@ def failure(status, code):
     return HTTPException(status, {'code': code})
 
 
-async def google_request(method, url, **kwargs):
+async def google_request(method, url, *, oauth_token_exchange=False, **kwargs):
     # Callers supply constant Google endpoints, never user-supplied URLs.
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
             response = await client.request(method, url, **kwargs)
         if response.status_code >= 400:
+            if oauth_token_exchange and response.status_code == 400:
+                # OAuth error identifiers are standardized and safe to classify;
+                # do not expose descriptions, codes, tokens, or response bodies.
+                error = response.json().get('error') if response.content else ''
+                if error == 'invalid_client':
+                    raise failure(401, 'DRIVE_OAUTH_CLIENT_REJECTED')
+                if error == 'invalid_grant':
+                    raise failure(401, 'DRIVE_OAUTH_CODE_REJECTED')
             if response.status_code in (400, 401):
                 raise failure(401, 'DRIVE_NEEDS_AUTH')
             if response.status_code == 403:
@@ -65,7 +73,7 @@ class GoogleDrive:
 
     async def exchange(self, code, origin):
         client_id = os.environ['GOOGLE_DRIVE_WEB_CLIENT_ID']
-        token = await google_request('POST', 'https://oauth2.googleapis.com/token', data={
+        token = await google_request('POST', 'https://oauth2.googleapis.com/token', oauth_token_exchange=True, data={
             'code': code, 'client_id': client_id,
             'client_secret': os.environ['GOOGLE_DRIVE_CLIENT_SECRET'],
             'redirect_uri': origin, 'grant_type': 'authorization_code',

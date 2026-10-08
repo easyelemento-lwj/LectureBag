@@ -10,6 +10,8 @@ const messages: Record<string, string> = {
   DRIVE_AUTH_EXPIRED: '연결 요청이 만료되었습니다. 다시 시도해 주세요.',
   DRIVE_AUTH_MISMATCH: '로그인 상태를 확인하고 다시 연결해 주세요.',
   DRIVE_NEEDS_AUTH: 'Google Drive 권한을 다시 확인해 주세요.',
+  DRIVE_OAUTH_CLIENT_REJECTED: 'Drive 서버의 OAuth 클라이언트 ID 또는 보안 비밀번호를 확인해 주세요.',
+  DRIVE_OAUTH_CODE_REJECTED: '연결 요청이 만료되었거나 이미 사용됐습니다. 새로고침 후 다시 연결해 주세요.',
   DRIVE_OFFLINE_CONSENT_REQUIRED: 'Google 계정에서 기존 LectureBag 권한을 확인한 뒤 다시 동의해 주세요.',
   DRIVE_SCOPE_REQUIRED: 'Google Drive 파일 접근 권한을 허용해 주세요.',
   DRIVE_PERSONAL_ACCOUNT_REQUIRED: '현재 연결 시험은 개인 Google 계정을 지원합니다.',
