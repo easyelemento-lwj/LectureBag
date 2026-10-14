@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import base64
 import json
+import hashlib
 
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -68,7 +69,53 @@ class DriveCatalog:
 
         return write(self.db.transaction())
 
-    def commit(self, uid, connection, record):
+    def feed_reference(self, uid, connection_id):
+        return self.reference(uid).parent.parent.collection('driveFeeds').document(connection_id)
+
+    def sync_cursor(self, uid, connection_id, sequence):
+        return base64.urlsafe_b64encode(json.dumps({'v': 1, 'owner': hashlib.sha256(uid.encode()).hexdigest(),
+            'connectionId': connection_id, 'sequence': sequence}, separators=(',', ':')).encode()).decode().rstrip('=')
+
+    def cursor_sequence(self, uid, connection_id, cursor):
+        try:
+            value = json.loads(base64.b64decode(cursor + '=' * (-len(cursor) % 4), altchars=b'-_', validate=True))
+            sequence = value['sequence']
+            if (value['v'] != 1 or value['owner'] != hashlib.sha256(uid.encode()).hexdigest()
+                    or value['connectionId'] != connection_id or type(sequence) is not int
+                    or not 0 <= sequence <= 9007199254740991):
+                raise ValueError()
+            return sequence
+        except (ValueError, KeyError, TypeError, UnicodeError, RecursionError):
+            raise failure(422, 'DRIVE_INVALID_CURSOR') from None
+
+    def sync_head(self, uid, connection_id):
+        head = self.feed_reference(uid, connection_id).get().to_dict() or {}
+        sequence = head.get('sequence', 0)
+        return {'cursor': self.sync_cursor(uid, connection_id, sequence), 'sequence': sequence}
+
+    def changes(self, uid, connection_id, cursor, limit=50):
+        after = self.cursor_sequence(uid, connection_id, cursor)
+        ref = self.feed_reference(uid, connection_id)
+        head = (ref.get().to_dict() or {}).get('sequence', 0)
+        if after > head:
+            raise failure(409, 'DRIVE_SYNC_RESET_REQUIRED')
+        if after == head:
+            return {'changes': [], 'cursor': cursor, 'sequence': after, 'hasMore': False}
+        query = ref.collection('events').where(filter=FieldFilter('sequence', '>', after))
+        # Single-field index; don't require a new composite index to read the journal.
+        values = [doc.to_dict() for doc in query.order_by('sequence').limit(limit).stream()]
+        values = [value for value in values if value['sequence'] <= head]
+        expected = after + 1
+        for value in values:
+            if value['sequence'] != expected:
+                raise failure(409, 'DRIVE_SYNC_RESET_REQUIRED')
+            expected += 1
+        if not values:
+            raise failure(409, 'DRIVE_SYNC_RESET_REQUIRED')
+        end = values[-1]['sequence']
+        return {'changes': values, 'cursor': self.sync_cursor(uid, connection_id, end), 'sequence': end, 'hasMore': end < head}
+
+    def commit(self, uid, connection, record, folder=None):
         state_ref = self.reference(uid)
         ref = state_ref.parent.parent.collection('cloudFiles').document(record['id'])
 
@@ -84,9 +131,17 @@ class DriveCatalog:
                 if saved.get('purgedAt') or saved.get('deletedAt') or any(saved.get(k) != record.get(k) for k in fields):
                     raise failure(409, 'DRIVE_FILE_CONFLICT')
                 return saved
+            feed = self.feed_reference(uid, connection['connectionId'])
+            head = feed.get(transaction=tx).to_dict() or {}
+            sequence = head.get('sequence', 0) + 1
             value = {**record, 'ownerUid': uid, 'revision': 1, 'updatedAt': timestamp(),
                      'deletedAt': None, 'purgedAt': None}
             tx.set(ref, value)
+            # File registration and durable notification are one transaction. A crash
+            # before the best-effort wakeup can never lose the new file's change record.
+            tx.set(feed, {'sequence': sequence})
+            tx.set(feed.collection('events').document(str(sequence).zfill(16)),
+                   {'sequence': sequence, 'file': value, 'folder': folder})
             return value
 
         return write(self.db.transaction())

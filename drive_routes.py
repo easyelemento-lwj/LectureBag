@@ -19,6 +19,7 @@ from drive_catalog import DriveCatalog, public_state
 from drive_google import GoogleDrive, failure
 from drive_token_store import token_store
 from web_origins import drive_web_origins
+from drive_notifications import publish_change, subscription, wait_for_change, watch_slot
 
 logger = logging.getLogger('lecturebag.drive')
 
@@ -181,6 +182,7 @@ def create_drive_router(verify_user, firebase_app):
                 pass  # Preserve the encrypted grant for later reconciliation.
             raise
         await svc.tokens.delete(uid, current.get('tokenRef'))
+        await publish_change(uid, updated['connectionId'])
         return public_state(updated)
 
     @router.post('/drive/disconnect')
@@ -194,6 +196,7 @@ def create_drive_router(verify_user, firebase_app):
             'connected': False, 'connectionId': current['connectionId'],
         })
         await svc.tokens.delete(uid, current.get('tokenRef'))
+        await publish_change(uid, current['connectionId'])
         return public_state(updated)
 
     @router.post('/cloud-files/commit')
@@ -234,7 +237,51 @@ def create_drive_router(verify_user, firebase_app):
             'capturedAt': body.capturedAt.astimezone(timezone.utc).isoformat(),
             'checksum': checksum,
             'checksumAlgorithm': 'sha256' if remote.get('sha256Checksum') else 'md5' if checksum else None}
-        return await asyncio.to_thread(svc.catalog.commit, uid, current, record)
+        folder = {'id': parents[0], 'name': parent.get('name') or body.logicalFolderId,
+                  'logicalFolderId': body.logicalFolderId}
+        if len(parent.get('parents', [])) == 1:
+            folder['parentId'] = parent['parents'][0]
+        result = await asyncio.to_thread(svc.catalog.commit, uid, current, record, folder)
+        await publish_change(uid, current['connectionId'])
+        return result
+
+    async def sync_connection(uid, svc, connection_id):
+        current = await asyncio.to_thread(svc.catalog.get, uid)
+        if not current['connected'] or current.get('connectionId') != str(connection_id):
+            raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+        return current
+
+    @router.get('/cloud-files/changes/head')
+    async def changes_head(request: Request, response: Response, connectionId: uuid.UUID, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        await sync_connection(uid, svc, connectionId)
+        result = await asyncio.to_thread(svc.catalog.sync_head, uid, str(connectionId))
+        await sync_connection(uid, svc, connectionId)
+        response.headers['Cache-Control'] = 'no-store'
+        return result
+
+    @router.get('/cloud-files/changes')
+    async def changes(request: Request, response: Response, connectionId: uuid.UUID,
+                      cursor: str = Query(min_length=1, max_length=2048),
+                      wait: int = Query(default=0, ge=0, le=20), context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        await sync_connection(uid, svc, connectionId)
+        # Validate before holding a connection. UID comes only from Firebase auth.
+        svc.catalog.cursor_sequence(uid, str(connectionId), cursor)
+        if not wait:
+            result = await asyncio.to_thread(svc.catalog.changes, uid, str(connectionId), cursor, 50)
+        else:
+            async with watch_slot(svc.tokens, uid):
+                async with subscription(uid, str(connectionId)) as subscriber:
+                    result = await asyncio.to_thread(svc.catalog.changes, uid, str(connectionId), cursor, 50)
+                    if not result['changes']:
+                        await wait_for_change(subscriber, request, wait)
+                        result = await asyncio.to_thread(svc.catalog.changes, uid, str(connectionId), cursor, 50)
+        await sync_connection(uid, svc, connectionId)
+        response.headers['Cache-Control'] = 'no-store'
+        return result
 
     @router.get('/cloud-files')
     async def list_files(folderId: str = Query(min_length=1, max_length=200),

@@ -27,6 +27,22 @@ class MemoryCatalog:
         self.values = {}
         self.files = {}
         self.reservations = {}
+        self.events = {}
+
+    sync_cursor = DriveCatalog.sync_cursor
+    cursor_sequence = DriveCatalog.cursor_sequence
+
+    def sync_head(self, uid, connection_id):
+        sequence = len(self.events.get((uid, connection_id), []))
+        return {'cursor': self.sync_cursor(uid, connection_id, sequence), 'sequence': sequence}
+
+    def changes(self, uid, connection_id, cursor, limit=50):
+        after = self.cursor_sequence(uid, connection_id, cursor)
+        events = self.events.get((uid, connection_id), [])
+        if after > len(events): raise drive_google.failure(409, 'DRIVE_SYNC_RESET_REQUIRED')
+        page = events[after:after + limit]
+        end = after + len(page)
+        return {'changes': copy.deepcopy(page), 'cursor': self.sync_cursor(uid, connection_id, end), 'sequence': end, 'hasMore': end < len(events)}
 
     def reserve_id(self, uid, connection, key, candidate):
         return self.reservations.setdefault((uid, key), candidate)
@@ -40,9 +56,14 @@ class MemoryCatalog:
         self.values[uid] = {**state, 'revision': expected_revision + 1}
         return self.get(uid)
 
-    def commit(self, uid, connection, record):
-        self.files[(uid, record['id'])] = record
-        return record
+    def commit(self, uid, connection, record, folder=None):
+        key = (uid, record['id'])
+        if key in self.files: return self.files[key]
+        value = {**record, 'ownerUid': uid, 'revision': 1}
+        self.files[key] = value
+        events = self.events.setdefault((uid, connection['connectionId']), [])
+        events.append({'sequence': len(events) + 1, 'file': value, 'folder': folder})
+        return value
 
     def list_files(self, uid, connection_id, folder_id, cursor, limit):
         return {'files': [v for (owner, _), v in self.files.items() if owner == uid
@@ -75,6 +96,7 @@ class FakeGoogle:
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch):
+    monkeypatch.delenv('REDIS_URL', raising=False)  # Never notify an actual Redis in tests.
     api.app.dependency_overrides.clear()
     api.app.dependency_overrides[api.verify_firebase_token] = lambda: {'uid': 'alice'}
     monkeypatch.setenv('DRIVE_ENABLED', 'true')
@@ -422,3 +444,191 @@ def test_real_catalog_transaction_rejects_stale_writes_and_deleted_file_registra
     catalog.replace('alice', 1, {'connected': False, 'connectionId': 'c'})
     with pytest.raises(HTTPException): catalog.commit('alice', state, {**record, 'id': 'next'})
     assert catalog.get('bob')['connected'] is False
+
+
+def test_durable_journal_atomic_idempotent_pages_gaps_and_owner_cursors(monkeypatch):
+    """Actual catalog code against an atomic, read-before-write transaction double."""
+    import drive_catalog
+    data = {}
+    class Snapshot:
+        def __init__(self, value): self.value = value
+        def to_dict(self): return copy.deepcopy(self.value)
+    class Ref:
+        def __init__(self, path): self.path = path
+        def collection(self, value): return Ref(f'{self.path}/{value}')
+        def document(self, value): return Ref(f'{self.path}/{value}')
+        @property
+        def parent(self): return Ref(self.path.rsplit('/', 1)[0])
+        def get(self, transaction=None):
+            if transaction: assert not transaction.pending, 'Firestore reads must precede writes'
+            return Snapshot(data.get(self.path))
+        def where(self, filter): return Query(self.path, filter.value)
+    class Query:
+        def __init__(self, path, after): self.path, self.after = path, after
+        def order_by(self, field): assert field == 'sequence'; return self
+        def limit(self, count): self.count = count; return self
+        def stream(self):
+            values = sorted((v for k, v in data.items() if k.startswith(self.path + '/') and v['sequence'] > self.after), key=lambda v: v['sequence'])
+            return [Snapshot(v) for v in values[:self.count]]
+    class Transaction:
+        def __init__(self): self.pending = {}
+        def set(self, ref, value):
+            self.pending[ref.path] = copy.deepcopy(value)
+            if db.fail and len(self.pending) == 2: raise RuntimeError('simulated transaction failure')
+    class DB:
+        fail = False
+        def collection(self, value): return Ref(value)
+        def transaction(self): return Transaction()
+    def transactional(fn):
+        def execute(tx):
+            result = fn(tx)
+            data.update(tx.pending)
+            return result
+        return execute
+    monkeypatch.setattr(drive_catalog.firestore, 'transactional', transactional)
+    db = DB(); catalog = DriveCatalog(db)
+    state = catalog.replace('alice', 0, {'connected': True, 'connectionId': 'c'})
+    zero = catalog.sync_head('alice', 'c')
+    record = {'id': 'first', 'connectionId': 'c', 'driveFileId': 'g', 'sizeBytes': 12}
+    db.fail = True
+    with pytest.raises(RuntimeError): catalog.commit('alice', state, record)
+    assert 'users/alice/cloudFiles/first' not in data
+    assert catalog.sync_head('alice', 'c') == zero
+    db.fail = False
+    first = catalog.commit('alice', state, record)
+    assert catalog.commit('alice', state, record) == first
+    assert catalog.sync_head('alice', 'c')['sequence'] == 1
+    for n in range(52): catalog.commit('alice', state, {**record, 'id': f'next-{n}'})
+    page = catalog.changes('alice', 'c', zero['cursor'])
+    assert len(page['changes']) == 50 and page['sequence'] == 50 and page['hasMore']
+    rest = catalog.changes('alice', 'c', page['cursor'])
+    assert len(rest['changes']) == 3 and not rest['hasMore']
+    assert catalog.changes('alice', 'c', rest['cursor'])['changes'] == []
+    for uid, conn, cursor in [('bob', 'c', zero['cursor']), ('alice', 'other', zero['cursor']), ('alice', 'c', '!!!!')]:
+        with pytest.raises(HTTPException) as exc: catalog.changes(uid, conn, cursor)
+        assert exc.value.status_code == 422
+    with pytest.raises(HTTPException) as exc: catalog.changes('alice', 'c', catalog.sync_cursor('alice', 'c', 54))
+    assert exc.value.detail['code'] == 'DRIVE_SYNC_RESET_REQUIRED'
+    del data['users/alice/driveFeeds/c/events/0000000000000002']
+    with pytest.raises(HTTPException) as exc: catalog.changes('alice', 'c', zero['cursor'])
+    assert exc.value.detail['code'] == 'DRIVE_SYNC_RESET_REQUIRED'
+
+
+def test_sync_api_scopes_bounds_and_timeout_recovers_a_missed_notification(monkeypatch):
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            connected, _ = await connect(client)
+            conn = connected.json()['connectionId']
+            head = await client.get('/api/cloud-files/changes/head', params={'connectionId': conn})
+            assert head.status_code == 200 and head.json()['sequence'] == 0
+            params = {'connectionId': conn, 'cursor': head.json()['cursor']}
+            assert (await client.get('/api/cloud-files/changes', params={**params, 'wait': 21})).status_code == 422
+            assert (await client.get('/api/cloud-files/changes', params={**params, 'cursor': 'invalid'})).status_code == 422
+            assert (await client.get('/api/cloud-files/changes', params=params, headers={'Origin': 'https://attacker.invalid'})).status_code == 403
+            async def missed(_subscriber, _request, _seconds):
+                svc.catalog.commit('alice', svc.catalog.get('alice'), {'id': 'offline-file', 'connectionId': conn})
+            monkeypatch.setattr(drive_routes, 'wait_for_change', missed)
+            result = await client.get('/api/cloud-files/changes', params={**params, 'wait': 20})
+            assert result.status_code == 200
+            assert result.json()['changes'][0]['file']['id'] == 'offline-file'
+            assert 'no-store' in result.headers['cache-control']
+            assert 'tokenRef' not in result.text and 'synthetic-refresh-secret' not in result.text
+            assert await svc.tokens.redis.keys('drive:watch:*') == []
+            next_params = {**params, 'cursor': result.json()['cursor']}
+            assert (await client.get('/api/cloud-files/changes', params=next_params)).json()['changes'] == []
+            api.app.dependency_overrides[api.verify_firebase_token] = lambda: {'uid': 'bob'}
+            assert (await client.get('/api/cloud-files/changes', params=params)).status_code == 409
+            api.app.dependency_overrides.clear()
+            assert (await client.get('/api/cloud-files/changes', params=params)).status_code == 401
+    asyncio.run(run())
+
+
+def test_watch_rechecks_connection_after_wait(monkeypatch):
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            connected, _ = await connect(client); conn = connected.json()['connectionId']
+            cursor = svc.catalog.sync_head('alice', conn)['cursor']
+            async def disconnected(*_):
+                current = svc.catalog.get('alice')
+                svc.catalog.replace('alice', current['revision'], {'connected': False, 'connectionId': conn})
+            monkeypatch.setattr(drive_routes, 'wait_for_change', disconnected)
+            result = await client.get('/api/cloud-files/changes', params={'connectionId': conn, 'cursor': cursor, 'wait': 20})
+            assert result.status_code == 409
+            assert await svc.tokens.redis.keys('drive:watch:*') == []
+    asyncio.run(run())
+
+
+def test_notification_is_scoped_and_watch_slots_release_on_cancellation(monkeypatch):
+    import drive_notifications as notices
+    from types import SimpleNamespace
+    async def run():
+        server = fakeredis.FakeServer()
+        monkeypatch.setenv('REDIS_URL', 'redis://synthetic.invalid')
+        monkeypatch.setattr(notices, 'Redis', SimpleNamespace(from_url=lambda *a, **kw: fakeredis.aioredis.FakeRedis(server=server)))
+        async with notices.subscription('alice', 'c') as subscriber:
+            assert subscriber is not None
+            await notices.publish_change('bob', 'c')
+            assert await subscriber.get_message(ignore_subscribe_messages=True, timeout=0.01) is None
+            await notices.publish_change('alice', 'c')
+            message = await subscriber.get_message(ignore_subscribe_messages=True, timeout=0.1)
+            assert message['data'] == b'changed'
+            assert b'alice' not in message['channel']
+        async with fakeredis.aioredis.FakeRedis() as redis:
+            tokens = DriveTokenStore(redis)
+            async with notices.watch_slot(tokens, 'alice'), notices.watch_slot(tokens, 'alice'), notices.watch_slot(tokens, 'alice'):
+                with pytest.raises(HTTPException) as exc:
+                    async with notices.watch_slot(tokens, 'alice'): pass
+                assert exc.value.status_code == 429
+                async with notices.watch_slot(tokens, 'bob'): pass
+            assert await redis.keys('drive:watch:*') == []
+            entered = asyncio.Event()
+            async def waiter():
+                async with notices.watch_slot(tokens, 'alice'):
+                    entered.set(); await asyncio.sleep(60)
+            task = asyncio.create_task(waiter()); await entered.wait(); task.cancel()
+            with pytest.raises(asyncio.CancelledError): await task
+            assert await redis.keys('drive:watch:*') == []
+    asyncio.run(run())
+
+
+def test_registered_file_wakes_an_authenticated_long_poll_across_redis_clients(monkeypatch):
+    import drive_notifications as notices
+    from types import SimpleNamespace
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            server = fakeredis.FakeServer()
+            monkeypatch.setenv('REDIS_URL', 'redis://synthetic.invalid')
+            monkeypatch.setattr(notices, 'Redis', SimpleNamespace(from_url=lambda *a, **kw: fakeredis.aioredis.FakeRedis(server=server)))
+            connected, _ = await connect(client); conn = connected.json()['connectionId']
+            cursor = svc.catalog.sync_head('alice', conn)['cursor']
+            entered = asyncio.Event()
+            async def waiting(subscriber, request, seconds):
+                entered.set()
+                await notices.wait_for_change(subscriber, request, seconds)
+            monkeypatch.setattr(drive_routes, 'wait_for_change', waiting)
+            task = asyncio.create_task(client.get('/api/cloud-files/changes', params={'connectionId': conn, 'cursor': cursor, 'wait': 20}))
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                svc.catalog.commit('alice', svc.catalog.get('alice'), {'id': 'new-file', 'connectionId': conn})
+                await notices.publish_change('alice', conn)
+                result = await asyncio.wait_for(task, 2)
+                assert result.status_code == 200 and result.json()['changes'][0]['file']['id'] == 'new-file'
+                assert await svc.tokens.redis.keys('drive:watch:*') == []
+            finally:
+                if not task.done():
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError): await task
+    asyncio.run(run())
+
+
+def test_optional_notification_configuration_failure_degrades_without_failing_upload(monkeypatch):
+    import drive_notifications as notices
+    from types import SimpleNamespace
+    def broken(*args, **kwargs): raise ValueError('synthetic bad configuration')
+    monkeypatch.setenv('REDIS_URL', 'synthetic-invalid')
+    monkeypatch.setattr(notices, 'Redis', SimpleNamespace(from_url=broken))
+    async def run():
+        await notices.publish_change('alice', 'c')
+        async with notices.subscription('alice', 'c') as subscriber:
+            assert subscriber is None
+    asyncio.run(run())
