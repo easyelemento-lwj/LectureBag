@@ -31,6 +31,10 @@ class RequestBoundary:
                     (b'x-content-type-options', b'nosniff'),
                     (b'cache-control', b'no-store'),
                     (b'x-request-id', request_id.encode()),
+                    (b'content-security-policy', b"frame-ancestors 'none'; object-src 'none'; base-uri 'self'"),
+                    (b'referrer-policy', b'no-referrer'),
+                    (b'x-frame-options', b'DENY'),
+                    (b'cross-origin-opener-policy', b'same-origin-allow-popups'),
                 ])
             await send(message)
 
