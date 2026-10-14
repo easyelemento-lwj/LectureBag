@@ -69,7 +69,15 @@ class GoogleDrive:
             raise failure(422, 'DRIVE_INVALID_FILE_ID')
         return await google_request('GET', f'https://www.googleapis.com/drive/v3/files/{file_id}',
             headers={'Authorization': f'Bearer {token}'}, params={'fields':
-                'id,name,mimeType,size,parents,md5Checksum,sha256Checksum,trashed,driveId,isAppAuthorized,ownedByMe,appProperties'})
+                'id,name,mimeType,size,parents,md5Checksum,sha256Checksum,trashed,explicitlyTrashed,trashedTime,driveId,isAppAuthorized,ownedByMe,appProperties'})
+
+    async def trash(self, token, file_id, trashed):
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', file_id) or type(trashed) is not bool:
+            raise failure(422, 'DRIVE_INVALID_FILE_ID')
+        # Never call files.delete or emptyTrash: this is always reversible trash.
+        return await google_request('PATCH', f'https://www.googleapis.com/drive/v3/files/{file_id}',
+            headers={'Authorization': f'Bearer {token}'}, json={'trashed': trashed},
+            params={'fields': 'id,trashed,explicitlyTrashed,trashedTime'})
 
     async def exchange(self, code, origin):
         client_id = os.environ['GOOGLE_DRIVE_WEB_CLIENT_ID']

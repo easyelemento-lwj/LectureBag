@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Request, Query, Response
+from fastapi import APIRouter, Depends, Request, Query, Response, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, AwareDatetime
 from redis.exceptions import RedisError
 from google.api_core.exceptions import GoogleAPIError
@@ -20,6 +20,7 @@ from drive_google import GoogleDrive, failure
 from drive_token_store import token_store
 from web_origins import drive_web_origins
 from drive_notifications import publish_change, subscription, wait_for_change, watch_slot
+from drive_lifecycle import file_lease, apply_operation, cancel_operation, reconcile_file
 
 logger = logging.getLogger('lecturebag.drive')
 
@@ -44,6 +45,17 @@ class TransferRequest(BaseModel):
 class ReserveRequest(TransferRequest):
     key: str = Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')
     candidate: str = Field(pattern=r'^[A-Za-z0-9_-]{1,200}$')
+
+
+class TrashRequest(TransferRequest):
+    fileId: uuid.UUID
+    operationId: uuid.UUID
+    revision: Annotated[int, Field(strict=True, ge=1)]
+    trashed: Annotated[bool, Field(strict=True)]
+
+
+class ReconcileRequest(TransferRequest):
+    cursor: str | None = Field(default=None, max_length=2048)
 
 
 class CommitRequest(BaseModel):
@@ -254,6 +266,67 @@ def create_drive_router(verify_user, firebase_app):
         if not current['connected'] or current.get('connectionId') != str(connection_id):
             raise failure(409, 'DRIVE_CONNECTION_CHANGED')
         return current
+
+    @router.get('/cloud-files/inventory')
+    async def inventory(request: Request, connectionId: uuid.UUID,
+                        cursor: str | None = Query(default=None, max_length=2048), context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        await sync_connection(uid, svc, connectionId)
+        result = await asyncio.to_thread(svc.catalog.inventory, uid, str(connectionId), cursor, 50)
+        await sync_connection(uid, svc, connectionId)
+        return result
+
+    async def lifecycle_access(uid, svc, current):
+        refresh = await svc.tokens.read(uid, current['connectionId'], current['tokenRef'])
+        return (await svc.google.refresh(refresh))['access_token']
+
+    @router.post('/cloud-files/trash')
+    async def trash_file(body: TrashRequest, request: Request, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        current = await sync_connection(uid, svc, body.connectionId)
+        async with file_lease(svc, uid, str(body.connectionId), str(body.fileId)) as guard:
+            access = await lifecycle_access(uid, svc, current)
+            result = await apply_operation(svc, uid, current, access, str(body.fileId), str(body.operationId),
+                                           body.revision, body.trashed, guard)
+        await publish_change(uid, str(body.connectionId))
+        return result
+
+    @router.post('/cloud-files/reconcile')
+    async def reconcile(body: ReconcileRequest, request: Request, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        current = await sync_connection(uid, svc, body.connectionId)
+        page = await asyncio.to_thread(svc.catalog.inventory, uid, str(body.connectionId), body.cursor, 10)
+        access = await lifecycle_access(uid, svc, current)
+        semaphore = asyncio.Semaphore(3)
+        async def check(file):
+            async with semaphore:
+                try:
+                    return await reconcile_file(svc, uid, current, access, file), None
+                except HTTPException as error:
+                    if error.status_code not in (403, 404, 409) or error.detail.get('code') == 'DRIVE_CONNECTION_CHANGED':
+                        raise
+                    return file, {'fileId': file['id'], 'code': error.detail['code']}
+        checked = await asyncio.gather(*(check(file) for file in page['files']))
+        values = [value for value, _ in checked]
+        await sync_connection(uid, svc, body.connectionId)
+        if any(a != b for a, b in zip(values, page['files'])):
+            await publish_change(uid, str(body.connectionId))
+        return {'files': values, 'nextCursor': page['nextCursor'], 'issues': [issue for _, issue in checked if issue]}
+
+    @router.post('/cloud-files/trash/cancel')
+    async def cancel_trash(body: TrashRequest, request: Request, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        current = await sync_connection(uid, svc, body.connectionId)
+        async with file_lease(svc, uid, str(body.connectionId), str(body.fileId)) as guard:
+            access = await lifecycle_access(uid, svc, current)
+            result = await cancel_operation(svc, uid, current, access, str(body.fileId), str(body.operationId),
+                                            body.revision, body.trashed, guard)
+        await publish_change(uid, str(body.connectionId))
+        return result
 
     @router.get('/cloud-files/changes/head')
     async def changes_head(request: Request, response: Response, connectionId: uuid.UUID, context=Depends(deps)):

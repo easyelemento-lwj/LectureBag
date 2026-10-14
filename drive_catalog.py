@@ -171,3 +171,126 @@ class DriveCatalog:
                 'capturedAt': last['capturedAt'], 'id': last['id'],
             }).encode()).decode().rstrip('=')
         return {'files': page, 'nextCursor': next_cursor}
+
+    def file_reference(self, uid, file_id):
+        return self.reference(uid).parent.parent.collection('cloudFiles').document(file_id)
+
+    def file(self, uid, connection_id, file_id):
+        value = self.file_reference(uid, file_id).get().to_dict()
+        if not value or value.get('connectionId') != connection_id or value.get('ownerUid') != uid:
+            raise failure(404, 'DRIVE_FILE_NOT_REGISTERED')
+        return value
+
+    def inventory(self, uid, connection_id, cursor=None, limit=50):
+        # Scan by document ID, including trash. No Drive-folder traversal or new
+        # composite index; old connection generations are skipped, not exposed.
+        collection = self.reference(uid).parent.parent.collection('cloudFiles')
+        query = collection.order_by('__name__')
+        if cursor:
+            try:
+                value = json.loads(base64.urlsafe_b64decode(cursor + '=' * (-len(cursor) % 4)))
+                if value['scope'] != hashlib.sha256(f'{uid}:{connection_id}'.encode()).hexdigest():
+                    raise ValueError()
+                last = value['id']
+                if not isinstance(last, str) or not last or '/' in last:
+                    raise ValueError()
+            except (ValueError, KeyError, TypeError, UnicodeError):
+                raise failure(422, 'DRIVE_INVALID_CURSOR') from None
+            query = query.start_after({'__name__': collection.document(last)})
+        docs = list(query.limit(limit + 1).stream())
+        page = docs[:limit]
+        next_cursor = None
+        if len(docs) > limit:
+            next_cursor = base64.urlsafe_b64encode(json.dumps({
+                'scope': hashlib.sha256(f'{uid}:{connection_id}'.encode()).hexdigest(),
+                'id': page[-1].id,
+            }).encode()).decode().rstrip('=')
+        return {'files': [v for doc in page if (v := doc.to_dict()).get('connectionId') == connection_id
+                          and v.get('ownerUid') == uid], 'nextCursor': next_cursor}
+
+    def lifecycle_refs(self, uid, connection_id, file_id, operation_id):
+        root = self.reference(uid).parent.parent
+        key = hashlib.sha256(f'{connection_id}:{file_id}'.encode()).hexdigest()
+        op_key = hashlib.sha256(f'{connection_id}:{operation_id}'.encode()).hexdigest()
+        return root.collection('driveFileIntents').document(key), root.collection('driveTrashOperations').document(op_key)
+
+    def pending_lifecycle(self, uid, connection_id, file_id):
+        ref, _ = self.lifecycle_refs(uid, connection_id, file_id, 'observe')
+        return ref.get().to_dict() or None
+
+    def begin_lifecycle(self, uid, connection, file_id, operation_id, revision, trashed):
+        """Durable intent precedes Google. Only the same operation can recover it."""
+        ref = self.file_reference(uid, file_id)
+        pending_ref, op_ref = self.lifecycle_refs(uid, connection['connectionId'], file_id, operation_id)
+
+        @firestore.transactional
+        def begin(tx):
+            current = self.reference(uid).get(transaction=tx).to_dict() or empty_state()
+            file = ref.get(transaction=tx).to_dict()
+            pending = pending_ref.get(transaction=tx).to_dict() or {}
+            op = op_ref.get(transaction=tx).to_dict()
+            if not current['connected'] or current['revision'] != connection['revision']:
+                raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+            if not file or file.get('ownerUid') != uid or file.get('connectionId') != connection['connectionId']:
+                raise failure(404, 'DRIVE_FILE_NOT_REGISTERED')
+            if op:
+                if op['fileId'] != file_id or op['trashed'] != trashed or op['revision'] != revision:
+                    raise failure(409, 'DRIVE_OPERATION_CONFLICT')
+                return op, file
+            if pending.get('operationId'):
+                raise failure(409, 'DRIVE_FILE_BUSY')
+            if file['revision'] != revision or file.get('purgedAt'):
+                raise failure(409, 'DRIVE_FILE_CONFLICT')
+            op = {'operationId': operation_id, 'fileId': file_id, 'connectionId': connection['connectionId'],
+                  'revision': revision, 'trashed': trashed, 'done': False, 'createdAt': timestamp()}
+            tx.set(op_ref, op)
+            tx.set(pending_ref, op)
+            return op, file
+        return begin(self.db.transaction())
+
+    def observe_lifecycle(self, uid, connection, expected, remote, operation=None):
+        """State, journal, and operation receipt commit atomically. Absence is not deletion."""
+        ref = self.file_reference(uid, expected['id'])
+        pending_ref, op_ref = self.lifecycle_refs(uid, connection['connectionId'], expected['id'],
+                                                operation['operationId'] if operation else 'observe')
+        feed = self.feed_reference(uid, connection['connectionId'])
+
+        @firestore.transactional
+        def write(tx):
+            current = self.reference(uid).get(transaction=tx).to_dict() or empty_state()
+            saved = ref.get(transaction=tx).to_dict()
+            pending = pending_ref.get(transaction=tx).to_dict() or {}
+            op = op_ref.get(transaction=tx).to_dict() if operation else None
+            head = feed.get(transaction=tx).to_dict() or {}
+            if not current['connected'] or current['revision'] != connection['revision']:
+                raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+            if not saved or saved.get('connectionId') != connection['connectionId']:
+                raise failure(409, 'DRIVE_FILE_CONFLICT')
+            if operation and op and op.get('done'):
+                return saved
+            if operation:
+                if pending.get('operationId') != operation['operationId'] or saved['revision'] != operation['revision']:
+                    raise failure(409, 'DRIVE_FILE_CONFLICT')
+            elif pending.get('operationId') or saved['revision'] != expected['revision']:
+                return saved  # Retry on a later observation; never overwrite an in-flight intent.
+            next_value = dict(saved)
+            if remote is None:
+                next_value['driveUnavailable'] = True
+            else:
+                next_value.update(driveUnavailable=bool(remote.get('_catalogContentChanged')),
+                                  driveExplicitlyTrashed=remote.get('explicitlyTrashed', False))
+                next_value['deletedAt'] = (remote.get('trashedTime') or saved.get('deletedAt') or timestamp()) if remote['trashed'] else None
+            changed = next_value.get('deletedAt') != saved.get('deletedAt') or any(
+                bool(next_value.get(k)) != bool(saved.get(k)) for k in ('driveUnavailable', 'driveExplicitlyTrashed'))
+            if changed:
+                next_value.update(revision=saved['revision'] + 1, updatedAt=timestamp(),
+                                  contentRevision=saved.get('contentRevision', saved['revision']))
+                sequence = head.get('sequence', 0) + 1
+                tx.set(ref, next_value)
+                tx.set(feed, {'sequence': sequence})
+                tx.set(feed.collection('events').document(str(sequence).zfill(16)), {'sequence': sequence, 'file': next_value})
+            if operation:
+                tx.set(op_ref, {**op, 'done': True})
+                tx.set(pending_ref, {})
+            return next_value
+        return write(self.db.transaction())
