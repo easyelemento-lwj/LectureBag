@@ -81,6 +81,10 @@ async def services(firebase_app):
 def configured_origin(request):
     origin = request.headers.get('origin', '')
     allowed = drive_web_origins()
+    # Same-origin browser GETs omit Origin. Fetch Metadata identifies this case;
+    # still require an explicitly allowed deployment origin and custom header.
+    if not origin and request.method == 'GET' and request.headers.get('sec-fetch-site') == 'same-origin':
+        origin = str(request.base_url).rstrip('/')
     parsed = urlsplit(origin)
     if origin not in allowed or parsed.path or parsed.query or parsed.fragment or parsed.username:
         raise failure(403, 'DRIVE_ORIGIN_DENIED')
