@@ -181,6 +181,14 @@ def create_drive_router(verify_user, firebase_app):
             refresh_token = await svc.tokens.read(uid, connection_id, current['tokenRef'])
         if not refresh_token:
             raise failure(409, 'DRIVE_OFFLINE_CONSENT_REQUIRED')
+        # Never publish a connected state until the stored credential proves
+        # that it can mint the access token required by background sync.
+        try:
+            await svc.google.refresh(refresh_token)
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                raise failure(409, 'DRIVE_OFFLINE_CONSENT_REQUIRED') from None
+            raise
         ref, version = await svc.tokens.save(uid, connection_id, refresh_token)
         try:
             updated = await asyncio.to_thread(svc.catalog.replace, uid, expected, {

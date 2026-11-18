@@ -173,6 +173,20 @@ def test_connect_binds_identity_and_keeps_credentials_out_of_responses(monkeypat
     asyncio.run(run())
 
 
+def test_connect_rejects_refresh_token_that_cannot_be_refreshed(monkeypatch):
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            async def expired(_token):
+                raise HTTPException(401, {'code': 'DRIVE_NEEDS_AUTH'})
+            svc.google.refresh = expired
+
+            response, _ = await connect(client)
+            assert response.status_code == 409
+            assert response.json()['detail']['code'] == 'DRIVE_OFFLINE_CONSENT_REQUIRED'
+            assert svc.catalog.get('alice')['connected'] is False
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('change', ['disabled', 'not_allowed', 'no_auth', 'unconfigured'])
 def test_private_endpoints_fail_closed(monkeypatch, change):
     if change == 'disabled': monkeypatch.setenv('DRIVE_ENABLED', 'false')

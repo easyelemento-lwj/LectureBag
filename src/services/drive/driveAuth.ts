@@ -4,6 +4,7 @@ interface CodeResponse { code?: string; error?: string }
 interface GoogleOAuth {
   initCodeClient(config: {
     client_id: string; scope: string; ux_mode: 'popup'; include_granted_scopes: boolean;
+    prompt: 'consent';
     callback: (response: CodeResponse) => void; error_callback: () => void;
   }): { requestCode(): void };
 }
@@ -58,6 +59,9 @@ export function requestDriveCode(challenge: DriveAuthChallenge, signal: AbortSig
       api.initCodeClient({
         client_id: challenge.clientId,
         scope: 'openid email https://www.googleapis.com/auth/drive.file',
+        // Background synchronization needs a refresh token. Google may omit
+        // one for a previously approved client unless consent is explicit.
+        prompt: 'consent',
         include_granted_scopes: false, ux_mode: 'popup',
         callback: response => finish(response.error ? undefined : response.code),
         error_callback: () => finish(),
