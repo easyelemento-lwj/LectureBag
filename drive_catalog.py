@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import base64
 import json
 import hashlib
+import uuid
 
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -36,6 +37,16 @@ class DriveCatalog:
     def get(self, uid):
         return self.reference(uid).get().to_dict() or empty_state()
 
+    def reconnect_id(self, uid, current, subject):
+        connection_id = current.get('connectionId')
+        if not connection_id:
+            return str(uuid.uuid4())
+        previous = self.reference(uid).parent.parent.collection('driveConnections').document(connection_id).get().to_dict() or {}
+        previous_subject = current.get('googleSubject') or previous.get('googleSubject')
+        if not previous_subject or previous_subject != subject:
+            raise failure(409, 'DRIVE_LIBRARY_RECOVERY_REQUIRED')
+        return connection_id
+
     def reserve_id(self, uid, connection, key, candidate):
         ref = self.reference(uid).parent.parent.collection('cloudOperations').document(key)
 
@@ -60,6 +71,10 @@ class DriveCatalog:
             if current['revision'] != expected_revision:
                 raise failure(409, 'DRIVE_CONNECTION_CHANGED')
             value = {**next_state, 'revision': expected_revision + 1, 'updatedAt': timestamp()}
+            if not value['connected']:
+                for key in ('googleSubject', 'permissionId'):
+                    if key in current:
+                        value[key] = current[key]
             tx.set(ref, value)
             if value.get('connectionId'):
                 history = ref.parent.parent.collection('driveConnections').document(value['connectionId'])

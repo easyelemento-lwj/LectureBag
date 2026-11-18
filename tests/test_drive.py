@@ -32,6 +32,11 @@ class MemoryCatalog:
     sync_cursor = DriveCatalog.sync_cursor
     cursor_sequence = DriveCatalog.cursor_sequence
 
+    def reconnect_id(self, uid, current, subject):
+        if current.get('connected'):
+            return current['connectionId']
+        return str(uuid.uuid4())
+
     def sync_head(self, uid, connection_id):
         sequence = len(self.events.get((uid, connection_id), []))
         return {'cursor': self.sync_cursor(uid, connection_id, sequence), 'sequence': sequence}
@@ -129,6 +134,20 @@ async def connect(client):
     body = {'state': challenge.json()['state'], 'code': 'synthetic-code'}
     response = await client.post('/api/drive/connect', json=body)
     return response, body
+
+
+def test_redirect_exchange_uses_fixed_callback(monkeypatch):
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            async def exchange(code, redirect_uri):
+                assert redirect_uri == ORIGIN + '/drive-auth-callback'
+                return {'refresh_token': 'synthetic-refresh-secret'}, {
+                    'googleSubject': 'google-alice', 'permissionId': 'permission-alice', 'email': 'alice@example.com'}
+            svc.google.exchange = exchange
+            state = (await client.post('/api/drive/auth/start', json={})).json()['state']
+            response = await client.post('/api/drive/connect', json={'state': state, 'code': 'synthetic-code', 'redirect': True})
+            assert response.status_code == 200, response.text
+    asyncio.run(run())
 
 
 def test_transfer_credentials_and_reservations_are_connection_bound(monkeypatch):

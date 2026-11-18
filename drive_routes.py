@@ -29,6 +29,7 @@ class ConnectRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     code: SecretStr = Field(min_length=1, max_length=4096)
     state: str = Field(min_length=32, max_length=128, pattern=r'^[A-Za-z0-9_-]+$')
+    redirect: bool = False
 
 
 class DisconnectRequest(BaseModel):
@@ -172,10 +173,10 @@ def create_drive_router(verify_user, firebase_app):
         current = await asyncio.to_thread(svc.catalog.get, uid)
         if current['revision'] != expected:
             raise failure(409, 'DRIVE_CONNECTION_CHANGED')
-        token, identity = await svc.google.exchange(body.code.get_secret_value(), origin)
+        token, identity = await svc.google.exchange(body.code.get_secret_value(), origin + '/drive-auth-callback' if body.redirect else origin)
         if current['connected'] and current['googleSubject'] != identity['googleSubject']:
             raise failure(409, 'DRIVE_ACCOUNT_MISMATCH')
-        connection_id = current['connectionId'] if current['connected'] else str(uuid.uuid4())
+        connection_id = await asyncio.to_thread(svc.catalog.reconnect_id, uid, current, identity['googleSubject'])
         refresh_token = token.get('refresh_token')
         if not refresh_token and current['connected']:
             refresh_token = await svc.tokens.read(uid, connection_id, current['tokenRef'])
