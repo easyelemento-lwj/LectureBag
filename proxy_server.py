@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
 from api_security import AiQuota, MAX_FILE_BYTES, RequestBoundary
 from drive_routes import create_drive_router
+from timetable_routes import create_timetable_router
 from web_origins import cors_allowed_origins
 
 load_dotenv()
@@ -67,6 +68,7 @@ async def verify_firebase_token(authorization: str | None = Header(None)):
 
 
 app.include_router(create_drive_router(verify_firebase_token, firebase_app))
+app.include_router(create_timetable_router(verify_firebase_token, firebase_app))
 
 
 class StrictModel(BaseModel):
