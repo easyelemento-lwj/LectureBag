@@ -39,6 +39,13 @@ class DriveCatalog:
 
     def reconnect_id(self, uid, current, subject):
         connection_id = current.get('connectionId')
+        library_key = hashlib.sha256(subject.encode()).hexdigest()
+        saved = self.reference(uid).parent.parent.collection('driveLibraries').document(library_key).get().to_dict() or {}
+        saved_id = saved.get('connectionId')
+        if saved_id:
+            if connection_id and connection_id != saved_id:
+                raise failure(409, 'DRIVE_LIBRARY_RECOVERY_REQUIRED')
+            return saved_id
         if not connection_id:
             return str(uuid.uuid4())
         previous = self.reference(uid).parent.parent.collection('driveConnections').document(connection_id).get().to_dict() or {}

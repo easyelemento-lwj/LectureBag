@@ -150,6 +150,28 @@ def test_redirect_exchange_uses_fixed_callback(monkeypatch):
     asyncio.run(run())
 
 
+def test_reconnect_uses_verified_subject_library_only():
+    class Snapshot:
+        def __init__(self, value): self.value = value
+        def to_dict(self): return self.value
+    class Ref:
+        parent = None
+        def __init__(self, data): self.data = data; self.parent = self
+        def collection(self, name): self.name = name; return self
+        def document(self, key): self.key = key; return self
+        def get(self): return Snapshot(self.data.get((self.name, self.key)))
+    subject = 'google-alice'
+    key = hashlib.sha256(subject.encode()).hexdigest()
+    catalog = DriveCatalog(None)
+    catalog.reference = lambda uid: Ref({('driveLibraries', key): {'connectionId': 'existing'}})
+    assert catalog.reconnect_id('alice', {'connectionId': 'existing'}, subject) == 'existing'
+    with pytest.raises(HTTPException) as exc:
+        catalog.reconnect_id('alice', {'connectionId': 'different'}, subject)
+    assert exc.value.detail['code'] == 'DRIVE_LIBRARY_RECOVERY_REQUIRED'
+    with pytest.raises(HTTPException):
+        catalog.reconnect_id('alice', {'connectionId': 'existing'}, 'another-account')
+
+
 def test_transfer_credentials_and_reservations_are_connection_bound(monkeypatch):
     async def run():
         async with environment(monkeypatch) as (client, svc):
