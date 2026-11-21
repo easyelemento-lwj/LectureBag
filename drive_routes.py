@@ -1,5 +1,6 @@
 """Internal-only Drive connection milestone; disabled unless explicitly enabled."""
 import asyncio
+import hashlib
 import logging
 import os
 import uuid
@@ -20,9 +21,23 @@ from drive_google import GoogleDrive, failure
 from drive_token_store import token_store
 from web_origins import drive_web_origins
 from drive_notifications import publish_change, subscription, wait_for_change, watch_slot
-from drive_lifecycle import file_lease, apply_operation, cancel_operation, reconcile_file
+from drive_lifecycle import file_lease, apply_operation, apply_purge, cancel_operation, reconcile_file
 
 logger = logging.getLogger('lecturebag.drive')
+
+
+# Temporary migration approval for exactly five requests confirmed by the account owner.
+# Other old clients cannot accidentally run stale permanent deletion requests.
+_APPROVED_PURGE_OWNER = '69dc7762fae8c020c5257ad8fbf14ba8d854d38140412bc7e14ab2ca13864800'
+_APPROVED_PURGE_CONNECTION = '4c78d4ff-3014-47a2-ab38-1dab86cb554c'
+_APPROVED_PURGE_OPERATIONS = frozenset(['b9fed5ded42839a62d6708ac0f1160655b0526873fe32eca78f78a702059cd7a', '24ce7141f5fff7363b86f89aba5d41c94f93ee07bd6ce10f51bb36ad73162ae5', 'a9cae63cfeea39538ae9ba4811776d1a5d724b64e85961750e3c75e814e04c67', 'b4aeacd92d4fadbf503cb106573dec43619303d1fd7b1a5874efd39cf8e8a7ed', 'eed6911500d4642f5954783d08e48bb03ca799dc88a1b96deec0e3bfd8fcde68'])
+
+
+def approved_purge(uid, body):
+    fingerprint = hashlib.sha256(f'{body.fileId}:{body.operationId}'.encode()).hexdigest()
+    return (hashlib.sha256(uid.encode()).hexdigest() == _APPROVED_PURGE_OWNER
+            and str(body.connectionId) == _APPROVED_PURGE_CONNECTION
+            and body.revision == 2 and body.trashed and fingerprint in _APPROVED_PURGE_OPERATIONS)
 
 
 class ConnectRequest(BaseModel):
@@ -53,6 +68,11 @@ class TrashRequest(TransferRequest):
     operationId: uuid.UUID
     revision: Annotated[int, Field(strict=True, ge=1)]
     trashed: Annotated[bool, Field(strict=True)]
+    purge: Annotated[bool, Field(strict=True)] = False
+
+
+class PrepareTrashRequest(TransferRequest):
+    operations: list[TrashRequest] = Field(min_length=1, max_length=50)
 
 
 class ReconcileRequest(TransferRequest):
@@ -290,15 +310,44 @@ def create_drive_router(verify_user, firebase_app):
         refresh = await svc.tokens.read(uid, current['connectionId'], current['tokenRef'])
         return (await svc.google.refresh(refresh))['access_token']
 
+    @router.post('/cloud-files/trash/prepare')
+    async def prepare_trash(body: PrepareTrashRequest, request: Request, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        current = await sync_connection(uid, svc, body.connectionId)
+        if any(op.connectionId != body.connectionId for op in body.operations):
+            raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+        results = []
+        for op in body.operations:
+            if op.purge and not approved_purge(uid, op):
+                results.append({'operationId': str(op.operationId), 'code': 'DRIVE_PURGE_NOT_APPROVED'})
+                continue
+            try:
+                receipt, _ = await asyncio.to_thread(svc.catalog.begin_lifecycle, uid, current,
+                    str(op.fileId), str(op.operationId), op.revision, op.trashed, op.purge)
+                results.append({'operationId': str(op.operationId), 'done': receipt['done']})
+            except HTTPException as error:
+                if not isinstance(error.detail, dict) or error.detail.get('code') not in (
+                    'DRIVE_FILE_BUSY', 'DRIVE_FILE_CONFLICT', 'DRIVE_OPERATION_CONFLICT', 'DRIVE_FILE_NOT_REGISTERED', 'DRIVE_FILE_NOT_TRASHED'):
+                    raise
+                results.append({'operationId': str(op.operationId), 'code': error.detail['code']})
+        await sync_connection(uid, svc, body.connectionId)
+        return {'operations': results}
+
     @router.post('/cloud-files/trash')
     async def trash_file(body: TrashRequest, request: Request, context=Depends(deps)):
         configured_origin(request)
         uid, svc = context
         current = await sync_connection(uid, svc, body.connectionId)
+        if body.purge and not approved_purge(uid, body):
+            raise failure(403, 'DRIVE_PURGE_NOT_APPROVED')
         async with file_lease(svc, uid, str(body.connectionId), str(body.fileId)) as guard:
             access = await lifecycle_access(uid, svc, current)
-            result = await apply_operation(svc, uid, current, access, str(body.fileId), str(body.operationId),
-                                           body.revision, body.trashed, guard)
+            if body.purge:
+                result = await apply_purge(svc, uid, current, access, str(body.fileId), str(body.operationId), body.revision, guard)
+            else:
+                result = await apply_operation(svc, uid, current, access, str(body.fileId), str(body.operationId),
+                                               body.revision, body.trashed, guard)
         await publish_change(uid, str(body.connectionId))
         return result
 
@@ -328,6 +377,8 @@ def create_drive_router(verify_user, firebase_app):
     @router.post('/cloud-files/trash/cancel')
     async def cancel_trash(body: TrashRequest, request: Request, context=Depends(deps)):
         configured_origin(request)
+        if body.purge:
+            raise failure(409, 'DRIVE_PURGE_CANNOT_CANCEL')
         uid, svc = context
         current = await sync_connection(uid, svc, body.connectionId)
         async with file_lease(svc, uid, str(body.connectionId), str(body.fileId)) as guard:

@@ -94,6 +94,24 @@ async def apply_operation(svc, uid, connection, access, file_id, operation_id, r
     return await asyncio.to_thread(svc.catalog.observe_lifecycle, uid, connection, file, remote, op)
 
 
+async def apply_purge(svc, uid, connection, access, file_id, operation_id, revision, guard):
+    op, file = await asyncio.to_thread(svc.catalog.begin_lifecycle, uid, connection, file_id, operation_id, revision, True, True)
+    if op['done']:
+        return file
+    # 403/404 alone is never evidence of permanent deletion. Keep the row and
+    # pending intent if a lost upstream reply leaves the outcome uncertain.
+    remote = await svc.google.file(access, file['driveFileId'])
+    owned_file(uid, connection, file, remote)
+    if remote.get('mimeType') == 'application/vnd.google-apps.folder' or remote.get('_catalogContentChanged'):
+        raise failure(409, 'DRIVE_FILE_CONFLICT')
+    if not remote['trashed']:
+        raise failure(409, 'DRIVE_FILE_NOT_TRASHED')
+    await current_connection(svc, uid, connection)
+    await guard()
+    await svc.google.purge(access, file['driveFileId'])
+    return await asyncio.to_thread(svc.catalog.finish_purge, uid, connection, file, op)
+
+
 async def cancel_operation(svc, uid, connection, access, file_id, operation_id, revision, trashed, guard):
     # Create a terminal receipt even if the original request has not arrived yet.
     # Cancellation observes reality; it never issues an inverse Google mutation.
@@ -112,10 +130,14 @@ async def cancel_operation(svc, uid, connection, access, file_id, operation_id, 
 
 
 async def reconcile_file(svc, uid, connection, access, file):
+    if file.get('purgedAt'):
+        return file
     try:
         async with file_lease(svc, uid, connection['connectionId'], file['id']) as guard:
             pending = await asyncio.to_thread(svc.catalog.pending_lifecycle, uid, connection['connectionId'], file['id'])
             if pending:
+                if pending.get('purge'):
+                    return file  # Only an explicitly approved trash request may resume a purge.
                 return await apply_operation(svc, uid, connection, access, file['id'], pending['operationId'],
                                              pending['revision'], pending['trashed'], guard)
             try:

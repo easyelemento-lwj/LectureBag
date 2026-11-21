@@ -240,7 +240,7 @@ class DriveCatalog:
         ref, _ = self.lifecycle_refs(uid, connection_id, file_id, 'observe')
         return ref.get().to_dict() or None
 
-    def begin_lifecycle(self, uid, connection, file_id, operation_id, revision, trashed):
+    def begin_lifecycle(self, uid, connection, file_id, operation_id, revision, trashed, purge=False):
         """Durable intent precedes Google. Only the same operation can recover it."""
         ref = self.file_reference(uid, file_id)
         pending_ref, op_ref = self.lifecycle_refs(uid, connection['connectionId'], file_id, operation_id)
@@ -256,19 +256,53 @@ class DriveCatalog:
             if not file or file.get('ownerUid') != uid or file.get('connectionId') != connection['connectionId']:
                 raise failure(404, 'DRIVE_FILE_NOT_REGISTERED')
             if op:
-                if op['fileId'] != file_id or op['trashed'] != trashed or op['revision'] != revision:
+                if op['fileId'] != file_id or op['trashed'] != trashed or op['revision'] != revision or bool(op.get('purge')) != purge:
                     raise failure(409, 'DRIVE_OPERATION_CONFLICT')
                 return op, file
             if pending.get('operationId'):
                 raise failure(409, 'DRIVE_FILE_BUSY')
             if file['revision'] != revision or file.get('purgedAt'):
                 raise failure(409, 'DRIVE_FILE_CONFLICT')
+            if purge and (not trashed or not file.get('deletedAt')):
+                raise failure(409, 'DRIVE_FILE_NOT_TRASHED')
             op = {'operationId': operation_id, 'fileId': file_id, 'connectionId': connection['connectionId'],
                   'revision': revision, 'trashed': trashed, 'done': False, 'createdAt': timestamp()}
+            if purge:
+                op['purge'] = True
             tx.set(op_ref, op)
             tx.set(pending_ref, op)
             return op, file
         return begin(self.db.transaction())
+
+    def finish_purge(self, uid, connection, expected, operation):
+        """Only called after a successful Google files.delete response."""
+        ref = self.file_reference(uid, expected['id'])
+        pending_ref, op_ref = self.lifecycle_refs(uid, connection['connectionId'], expected['id'], operation['operationId'])
+        feed = self.feed_reference(uid, connection['connectionId'])
+
+        @firestore.transactional
+        def finish(tx):
+            current = self.reference(uid).get(transaction=tx).to_dict() or empty_state()
+            saved = ref.get(transaction=tx).to_dict()
+            pending = pending_ref.get(transaction=tx).to_dict() or {}
+            op = op_ref.get(transaction=tx).to_dict() or {}
+            head = feed.get(transaction=tx).to_dict() or {}
+            if not current['connected'] or current['revision'] != connection['revision']:
+                raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+            if op.get('done'):
+                return saved
+            if (not op.get('purge') or pending.get('operationId') != operation['operationId']
+                    or not saved or saved['revision'] != operation['revision']):
+                raise failure(409, 'DRIVE_FILE_CONFLICT')
+            value = {**saved, 'purgedAt': timestamp(), 'updatedAt': timestamp(), 'revision': saved['revision'] + 1}
+            sequence = head.get('sequence', 0) + 1
+            tx.set(ref, value)
+            tx.set(feed, {'sequence': sequence})
+            tx.set(feed.collection('events').document(str(sequence).zfill(16)), {'sequence': sequence, 'file': value})
+            tx.set(op_ref, {**op, 'done': True})
+            tx.set(pending_ref, {})
+            return value
+        return finish(self.db.transaction())
 
     def observe_lifecycle(self, uid, connection, expected, remote, operation=None):
         """State, journal, and operation receipt commit atomically. Absence is not deletion."""

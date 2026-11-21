@@ -150,6 +150,28 @@ def test_redirect_exchange_uses_fixed_callback(monkeypatch):
     asyncio.run(run())
 
 
+def test_prepare_registers_reversible_intents_and_rejects_purge(monkeypatch):
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            connected, _ = await connect(client)
+            cid = connected.json()['connectionId']
+            calls = []
+            def begin(uid, current, file_id, operation_id, revision, trashed, purge=False):
+                calls.append((uid, file_id, operation_id, revision, trashed))
+                return {'done': False}, {}
+            svc.catalog.begin_lifecycle = begin
+            op = {'connectionId': cid, 'fileId': str(uuid.uuid4()), 'operationId': str(uuid.uuid4()), 'revision': 1, 'trashed': True}
+            response = await client.post('/api/cloud-files/trash/prepare', json={'connectionId': cid, 'operations': [op]})
+            assert response.status_code == 200
+            assert response.json() == {'operations': [{'operationId': op['operationId'], 'done': False}]}
+            assert len(calls) == 1
+            response = await client.post('/api/cloud-files/trash/prepare', json={'connectionId': cid, 'operations': [{**op, 'purge': True}]})
+            assert response.status_code == 200
+            assert response.json()['operations'][0]['code'] == 'DRIVE_PURGE_NOT_APPROVED'
+            assert len(calls) == 1
+    asyncio.run(run())
+
+
 def test_reconnect_uses_verified_subject_library_only():
     class Snapshot:
         def __init__(self, value): self.value = value
@@ -687,3 +709,18 @@ def test_optional_notification_configuration_failure_degrades_without_failing_up
         async with notices.subscription('alice', 'c') as subscriber:
             assert subscriber is None
     asyncio.run(run())
+
+
+def test_purge_approval_is_scoped_to_exact_owner_connection_and_operation(monkeypatch):
+    import hashlib
+    import drive_routes
+    monkeypatch.setattr(drive_routes, '_APPROVED_PURGE_OWNER', hashlib.sha256(b'alice').hexdigest())
+    value = {'connectionId': '4c78d4ff-3014-47a2-ab38-1dab86cb554c',
+             'fileId': 'e909a0bb-4e5f-47b8-adb1-e6067271b50a',
+             'operationId': 'd0bdfda6-15ec-45b2-9ef3-8aa2cd0c6d8d', 'revision': 2, 'trashed': True, 'purge': True}
+    body = drive_routes.TrashRequest(**value)
+    assert drive_routes.approved_purge('alice', body)
+    assert not drive_routes.approved_purge('other', body)
+    for change in ({'fileId': str(uuid.uuid4())}, {'operationId': str(uuid.uuid4())},
+                   {'connectionId': str(uuid.uuid4())}, {'revision': 1}, {'trashed': False}):
+        assert not drive_routes.approved_purge('alice', drive_routes.TrashRequest(**(value | change)))

@@ -64,6 +64,12 @@ def verify_identity(token, client_id):
 
 
 class GoogleDrive:
+    async def purge(self, token, file_id):
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', file_id):
+            raise failure(422, 'DRIVE_INVALID_FILE_ID')
+        return await google_request('DELETE', f'https://www.googleapis.com/drive/v3/files/{file_id}',
+            headers={'Authorization': f'Bearer {token}'})
+
     async def file(self, token, file_id):
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', file_id):
             raise failure(422, 'DRIVE_INVALID_FILE_ID')
