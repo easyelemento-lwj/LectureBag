@@ -351,7 +351,6 @@ def test_only_exact_registered_owned_drive_file_can_be_trashed(monkeypatch, db, 
 
 
 def test_permanent_delete_requires_trash_and_google_success_then_replay_is_harmless(monkeypatch, db):
-    monkeypatch.setattr('drive_routes.approved_purge', lambda uid, body: True)
     async def run():
         async with setup(monkeypatch, db) as (client, svc, conn, file):
             calls = []
@@ -360,10 +359,10 @@ def test_permanent_delete_requires_trash_and_google_success_then_replay_is_harml
                 del svc.google.remote[file_id]
                 return {}
             svc.google.purge = purge
-            assert (await client.post('/api/cloud-files/trash', json={**request(conn, file), 'purge': True})).status_code == 409
+            assert (await client.post('/api/cloud-files/trash', json={**request(conn, file), 'purge': True, 'purgeConfirmed': True})).status_code == 409
             assert calls == []
             deleted = (await client.post('/api/cloud-files/trash', json=request(conn, file))).json()
-            body = {**request(conn, deleted), 'purge': True}
+            body = {**request(conn, deleted), 'purge': True, 'purgeConfirmed': True}
             prepared = await client.post('/api/cloud-files/trash/prepare', json={'connectionId': conn['connectionId'], 'operations': [body]})
             assert prepared.status_code == 200
             assert svc.catalog.pending_lifecycle('alice', conn['connectionId'], file['id'])['purge'] is True
@@ -384,7 +383,6 @@ def test_permanent_delete_requires_trash_and_google_success_then_replay_is_harml
 
 @pytest.mark.parametrize('problem', ['missing', 'denied', 'restored', 'foreign', 'delete_failed'])
 def test_purge_never_hides_unconfirmed_or_wrong_drive_files(monkeypatch, db, problem):
-    monkeypatch.setattr('drive_routes.approved_purge', lambda uid, body: True)
     async def run():
         async with setup(monkeypatch, db) as (client, svc, conn, file):
             deleted = (await client.post('/api/cloud-files/trash', json=request(conn, file))).json()
@@ -397,7 +395,7 @@ def test_purge_never_hides_unconfirmed_or_wrong_drive_files(monkeypatch, db, pro
             elif problem == 'denied': svc.google.remote['drive-original'] = drive_google.failure(403, 'DRIVE_ACCESS_DENIED')
             elif problem == 'restored': svc.google.remote['drive-original']['trashed'] = False
             elif problem == 'foreign': svc.google.remote['drive-original']['appProperties']['lecturebagOwner'] = 'someone-else'
-            response = await client.post('/api/cloud-files/trash', json={**request(conn, deleted), 'purge': True})
+            response = await client.post('/api/cloud-files/trash', json={**request(conn, deleted), 'purge': True, 'purgeConfirmed': True})
             assert response.status_code >= 400
             assert not svc.catalog.file('alice', conn['connectionId'], file['id']).get('purgedAt')
             assert len(calls) == (1 if problem == 'delete_failed' else 0)
