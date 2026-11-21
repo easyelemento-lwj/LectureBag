@@ -1,5 +1,6 @@
 import { createStore, get, set, del } from 'idb-keyval';
-import { bindCapture, captureIntents, captureSource } from '../../utils/mediaStorage';
+import { bindCapture, captureIntents, uploadSource as captureSource } from '../../utils/mediaStorage';
+import { MAX_AUDIO_BYTES, audioExtensions } from './audioFormat';
 import { CloudCatalog, CatalogError } from './cloudCatalog';
 import { DriveTransferError } from './driveClient';
 import { sha256, trialClient } from './photoTrial';
@@ -10,10 +11,12 @@ import type { DriveIdentity } from './types';
 const sessions = createStore('lecturebag-drive-sessions', 'sessions');
 export const folderKey = (path: string[]) => sha256(new Blob([JSON.stringify(path)]));
 export function captureBlob(dataUrl: string) {
-  const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  const match = /^data:((?:image\/(?:jpeg|png|webp))|(?:audio\/(?:webm|mp4|ogg)));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
   if (!match) throw new DriveTransferError('failed');
+  const limit = audioExtensions[match[1]] ? MAX_AUDIO_BYTES : 20 * 1024 * 1024;
+  if (match[2].length > Math.ceil(limit / 3) * 4) throw new DriveTransferError('failed');
   const bytes = Uint8Array.from(atob(match[2]), char => char.charCodeAt(0));
-  if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new DriveTransferError('failed');
+  if (!bytes.length || bytes.length > limit) throw new DriveTransferError('failed');
   return new Blob([bytes], { type: match[1] });
 }
 
@@ -83,7 +86,11 @@ export async function uploadCapture(identity: DriveIdentity, queue: UploadQueue,
     const checksum = await sha256(blob);
     if (job.state === 'retry_wait') await advance({ state: job.resumeState === 'queued' ? 'uploading' : job.resumeState || 'uploading' });
     if (job.state === 'queued') await advance({ state: 'uploading' });
-    if (!job.driveFileId) await advance({ state: 'uploading', driveFileId: await remoteCall(s => client.generateId(s)) });
+    if (!job.driveFileId) {
+      const candidate = await remoteCall(s => client.generateId(s));
+      const reserved = await remoteCall(s => catalog.reserveId(identity.connectionId, `file_${fileId}`, candidate, s));
+      await advance({ state: 'uploading', driveFileId: reserved.id });
+    }
     // Durable ID precedes any byte transmission. Completed remote files are never re-uploaded.
     let remote;
     try { remote = await remoteCall(s => client.metadata(job.driveFileId!, s)); }

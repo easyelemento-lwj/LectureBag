@@ -48,14 +48,13 @@ test('desktop warmup never accesses camera or microphone, even if permissions ar
   assert.equal(calls, 0);
 });
 
-test('mobile warmup requests camera then microphone and releases the permission-only mic stream', async () => {
+test('mobile warmup requests only the camera when recording is disabled', async () => {
   const calls: MediaStreamConstraints[] = []; let stopped = 0;
   const stream = { getTracks: () => [{ stop: () => { stopped++; } }] } as unknown as MediaStream;
   const media = { getUserMedia: async (constraints: MediaStreamConstraints) => { calls.push(constraints); return stream; } };
   assert.equal(await prewarmCapture(true, media), stream);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
   assert.equal(calls[0].audio, false);
-  assert.deepEqual(calls[1], { audio: true });
-  assert.equal(stopped, 1);
+  assert.equal(stopped, 0);
 });

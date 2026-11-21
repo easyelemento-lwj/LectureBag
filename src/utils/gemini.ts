@@ -48,6 +48,11 @@ async function requestAi<T>(path: string, body: unknown, signal?: AbortSignal): 
         AI_PROVIDER_QUOTA: 'AI 제공 서비스의 사용량 한도에 도달했습니다. 한도 또는 결제 설정을 확인해주세요.',
         AI_INPUT_REJECTED: 'AI 서비스가 자료 형식을 처리하지 못했습니다. 다른 사진이나 음성 파일로 시도해주세요.',
         AI_PROVIDER_ERROR: 'AI 제공 서비스에서 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+        AI_TIMEOUT: 'AI 응답이 늦어 자동 재시도 후에도 완료하지 못했습니다. 잠시 후 다시 시도해주세요.',
+        AI_NETWORK_ERROR: 'AI 서비스 연결이 불안정합니다. 잠시 후 다시 시도해주세요.',
+        AI_EMPTY_RESPONSE: 'AI가 분석 결과를 반환하지 않았습니다. 다시 시도해주세요.',
+        AI_INVALID_RESPONSE: '시간표 분석 결과의 형식이 올바르지 않습니다. 선명한 사진으로 다시 시도해주세요.',
+        AI_INTERNAL_ERROR: 'AI 서버에서 처리 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
       };
       const payload = await res.json().catch(() => null);
       const code = payload?.detail?.code;
@@ -67,10 +72,4 @@ export async function analyzeTimetableImage(base64Image: string): Promise<Timeta
   const data = await requestAi<{ entries: TimetableEntry[] }>('/api/analyze-timetable', { base64Image });
   if (!Array.isArray(data.entries)) throw new Error('시간표 분석 결과가 올바르지 않습니다.');
   return data.entries;
-}
-
-export async function generateAiSummary(fileDataUrl: string | undefined, fileName: string, signal?: AbortSignal): Promise<string> {
-  const data = await requestAi<{ summary: string }>('/api/summarize', { fileDataUrl, fileName }, signal);
-  if (typeof data.summary !== 'string') throw new Error('AI 요약 결과가 올바르지 않습니다.');
-  return data.summary;
 }

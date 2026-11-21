@@ -9,7 +9,7 @@ const modes = [
     steps: ['연도', '학기', '과목', '달', '일'], note: '시간표 사진을 먼저 등록해주세요.', icon: CalendarDays },
 ] as const;
 
-export function StorageModeGuide({ mode }: { mode: 'default' | 'timetable' }) {
+export function StorageModeGuide({ mode, onChange }: { mode: 'default' | 'timetable'; onChange: (mode: 'default' | 'timetable') => void }) {
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2" aria-label="파일 정리 방식 안내">
       {modes.map(item => {
@@ -17,7 +17,11 @@ export function StorageModeGuide({ mode }: { mode: 'default' | 'timetable' }) {
         const Icon = item.icon;
         return (
           <section key={item.id} aria-label={`${item.name}${active ? ', 사용 중' : ''}`}
-            className={`min-w-0 rounded-2xl border p-4 sm:p-5 transition-colors ${active ? 'border-neutral-900 bg-white shadow-xs' : 'border-neutral-200/70 bg-neutral-50/70'}`}>
+            className={`relative min-w-0 rounded-2xl border p-4 sm:p-5 transition-colors ${active ? 'border-neutral-900 bg-white shadow-xs' : 'border-neutral-200/70 bg-neutral-50/70 hover:bg-neutral-100'}`}>
+            <button type="button" aria-label={item.name} aria-pressed={active}
+              data-tour={item.id === 'default' ? 'default' : 'schedule'}
+              onClick={() => { if (!active) onChange(item.id); }}
+              className="absolute inset-0 z-10 cursor-pointer rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700 active:bg-black/5" />
             <div className="mb-4 flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2.5">
                 <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-500 border border-neutral-200/70'}`}>

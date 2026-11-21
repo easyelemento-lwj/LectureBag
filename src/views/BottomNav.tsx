@@ -3,28 +3,26 @@
  *
  * The floating pill-shaped toolbar at the bottom of the screen.
  * Renders one of three layouts depending on mode:
- *   1. Camera Mode     — Photos | Shutter | Folder
- *   2. Audio Idle      — Recordings | Record | Folder
- *   3. Recording Active — Recordings | Pause | Stop | Folder
+ *   1. Camera Mode     — Audio Mode | Shutter | Folder
+ *   2. Audio Idle      — Camera Mode | Record | Folder
+ *   3. Recording Active — Camera Mode | Pause | Stop | Folder
  */
 import React from 'react';
-import { Image, Volume2, Folder, Play, Pause, Square } from 'lucide-react';
-import { RecordedAudio, CapturedPhoto } from '../types';
+import { Camera, Mic, Folder, Play, Pause, Square } from 'lucide-react';
 
 interface BottomNavProps {
   isAudioMode: boolean;
   isRecording: boolean;
   isPaused: boolean;
-  photos: CapturedPhoto[];
-  recordings: RecordedAudio[];
   captureDisabled?: boolean;
+  recordingTime?: string;
+  recordingSaving?: boolean;
 
   onTakeSnapshot: () => void;
   onStartRecording: (e?: React.MouseEvent) => void;
   onTogglePauseRecording: (e?: React.MouseEvent) => void;
   onStopRecording: (e?: React.MouseEvent) => void;
-  onOpenRecentPhotos: () => void;
-  onOpenRecentRecordings: () => void;
+  onSwitchMode: () => void;
   onOpenFolder: () => void;
 }
 
@@ -32,15 +30,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   isAudioMode,
   isRecording,
   isPaused,
-  photos,
-  recordings,
   captureDisabled,
+  recordingTime,
+  recordingSaving,
   onTakeSnapshot,
   onStartRecording,
   onTogglePauseRecording,
   onStopRecording,
-  onOpenRecentPhotos,
-  onOpenRecentRecordings,
+  onSwitchMode,
   onOpenFolder,
 }) => {
   const pillBase =
@@ -52,20 +49,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     /* ── Recording Active ── */
     return (
       <div className={`${pillBase} gap-6`}>
-        {/* Recent Recordings */}
-        <button
-          onClick={onOpenRecentRecordings}
-          className={`w-14 h-14 relative ${btnBase}`}
-          data-tour="recordings"
-          title="최근 녹음 파일"
-        >
-          <Volume2 className="w-6 h-6 stroke-[2]" />
-          {recordings.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-black text-white text-[10px] font-bold w-4.5 h-4.5 rounded-full flex items-center justify-center border border-white">
-              {recordings.length}
-            </span>
-          )}
-        </button>
+        <button onClick={onSwitchMode} className={`w-14 h-14 ${btnBase}`} data-tour="camera" title="카메라 모드 전환" aria-label="카메라 모드 전환"><Camera className="w-6 h-6" /></button>
 
         {/* Pause / Resume */}
         <button
@@ -108,27 +92,15 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     /* ── Audio Idle ── */
     return (
       <div className={`${pillBase} gap-7 px-7`}>
-        {/* Recent Recordings */}
-        <button
-          onClick={onOpenRecentRecordings}
-          className={`w-14 h-14 relative ${btnBase}`}
-          data-tour="recordings"
-          title="최근 녹음 파일"
-        >
-          <Volume2 className="w-6 h-6 stroke-[2]" />
-          {recordings.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-black text-white text-[10px] font-bold w-4.5 h-4.5 rounded-full flex items-center justify-center border border-white">
-              {recordings.length}
-            </span>
-          )}
-        </button>
+        <button onClick={onSwitchMode} className={`w-14 h-14 ${btnBase}`} data-tour="camera" title="카메라 모드 전환" aria-label="카메라 모드 전환"><Camera className="w-6 h-6" /></button>
 
         {/* Record Button */}
         <button
+          disabled={recordingSaving}
           onClick={onStartRecording}
           className="w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-lg active:scale-90 transition-all border-2 border-neutral-200 ring-2 ring-neutral-200/60 p-0"
           data-tour="record"
-          title="새 녹음 시작"
+          title={recordingSaving ? '녹음 저장 중' : '새 녹음 시작'}
         >
           <div className="w-11.5 h-11.5 rounded-full border-[3px] border-[#D30000] bg-white" />
         </button>
@@ -149,20 +121,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   /* ── Camera Mode ── */
   return (
     <div className={`${pillBase} gap-7 px-7`}>
-      {/* Recent Photos */}
-      <button
-        onClick={onOpenRecentPhotos}
-        className={`w-14 h-14 relative ${btnBase}`}
-        data-tour="photo"
-        title="최근 찍은 사진"
-      >
-        <Image className="w-6 h-6 stroke-[2]" />
-        {photos.length > 0 && (
-          <span className="absolute -top-1 -right-1 bg-black text-white text-[10px] font-bold w-4.5 h-4.5 rounded-full flex items-center justify-center border border-white">
-            {photos.length}
-          </span>
-        )}
-      </button>
+      {RECORDING_ENABLED && <button onClick={onSwitchMode} className={`w-14 h-14 ${btnBase} flex-col gap-0.5`} data-tour="audio" title={isRecording ? '진행 중인 녹음 보기' : '녹음 모드 전환'} aria-label={isRecording ? `녹음 ${isPaused ? '일시정지' : '중'} ${recordingTime}, 녹음 화면 열기` : '녹음 모드 전환'}>
+        <Mic className={`w-6 h-6 ${isRecording && !isPaused ? 'text-red-600' : ''}`} />
+        {isRecording && <span className="text-[10px] tabular-nums leading-none">{recordingTime}</span>}
+      </button>}
 
       {/* Shutter */}
       <button
@@ -187,3 +149,4 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     </div>
   );
 };
+import { RECORDING_ENABLED } from '../utils/featureFlags';

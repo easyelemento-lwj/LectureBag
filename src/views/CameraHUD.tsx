@@ -2,7 +2,6 @@
  * CameraHUD.tsx — Sidebar equivalent
  *
  * All overlay controls that float on top of the camera viewport:
- * - Top-left: Mic / back-to-camera button
  * - Top-center: Camera status badge
  * - Top-right: Aspect-ratio pill + 3-dot dropdown (flash / camera-flip)
  * - Bottom-center: Mode pill ("PPT / 판서 자동 보정 모드")
@@ -12,7 +11,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Zap, ZapOff, RefreshCw, Mic, Camera, MoreHorizontal, Sparkles, RotateCcw,
+  Zap, ZapOff, RefreshCw, Camera, MoreHorizontal, Sparkles,
 } from 'lucide-react';
 import { FlashMode, AspectRatio } from '../types';
 import { useAccentColor } from '../context/AccentColorContext';
@@ -29,7 +28,6 @@ interface CameraHUDProps {
   focusPoint: { x: number; y: number } | null;
 
   // Handlers
-  onStartRecording: (e?: React.MouseEvent) => void;
   onToggleAspectRatio: (e: React.MouseEvent) => void;
   onToggleFlash: (e?: React.MouseEvent) => void;
   onToggleCameraFacing: (e?: React.MouseEvent) => void;
@@ -43,7 +41,6 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
   aspectRatio,
   isCameraMenuOpen,
   focusPoint,
-  onStartRecording,
   onToggleAspectRatio,
   onToggleFlash,
   onToggleCameraFacing,
@@ -64,44 +61,6 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
         </div>
       )}
 
-      {/* Top-Left: Mic / Audio Button */}
-      <div
-        className="absolute left-4 z-40 flex items-center gap-2"
-        style={{ top: 'max(16px, env(safe-area-inset-top, 16px))' }}
-      >
-        <button
-          onClick={onStartRecording}
-          className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-white w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-lg"
-          data-tour="audio"
-          title="음성 녹음 시작"
-        >
-          <Mic className="w-5.5 h-5.5 text-[#D30000]" />
-        </button>
-      </div>
-
-      {/* Top-Center: Camera Status Indicator */}
-      <div
-        className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-[11px] font-medium shadow-md"
-        style={{ top: 'max(16px, env(safe-area-inset-top, 16px))' }}
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full ${
-            cameraStatus === 'live'
-              ? 'bg-green-400 animate-pulse'
-              : cameraStatus === 'loading'
-              ? 'bg-yellow-400 animate-pulse'
-              : 'bg-red-500'
-          }`}
-        />
-        <span className="text-neutral-300">
-          {cameraStatus === 'live'
-            ? '카메라 연결됨'
-            : cameraStatus === 'loading'
-            ? '카메라 연결 중...'
-            : '카메라 오프라인'}
-        </span>
-      </div>
-
       {/* Top-Right: Aspect Ratio + 3-dot menu */}
       <div
         className="absolute right-4 z-40 flex items-center gap-2.5"
@@ -112,7 +71,7 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
           className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-white text-xs font-bold px-3.5 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-lg"
           title="카메라 비율"
         >
-          <span>{aspectRatio}</span>
+          <span>{aspectRatio === '전체' ? 'FULL' : aspectRatio}</span>
         </button>
 
         <div className="relative">
@@ -167,17 +126,6 @@ export const CameraHUD: React.FC<CameraHUDProps> = ({
                   />
                 </button>
 
-                {/* Hard Reload / Update App Button (for PWA Home Screen icon cache bust) */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    window.location.href = window.location.origin + '/?v=' + Date.now();
-                  }}
-                  className="w-11 h-11 rounded-full bg-neutral-900/90 backdrop-blur-md hover:bg-neutral-800 active:scale-90 border border-white/25 flex items-center justify-center transition-all shadow-lg"
-                  title="앱 새로고침 및 최신 버전 동기화"
-                >
-                  <RotateCcw className="w-5.5 h-5.5 text-white" />
-                </button>
               </motion.div>
             )}
           </AnimatePresence>

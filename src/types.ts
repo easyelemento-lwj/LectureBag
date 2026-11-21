@@ -24,6 +24,10 @@ export interface RecordedAudio {
   id: string;
   name: string;
   duration: string;
+  /** Active elapsed recording time; excludes explicit pause, not decoded media duration. */
+  durationMs?: number;
+  /** Container timeline check, not a guarantee of complete captured speech. */
+  integrity?: import('./utils/recordingIntegrity').RecordingIntegrity;
   timestamp: Date | string;
   size?: string;
   dataUrl?: string;

@@ -19,7 +19,6 @@ import { accountKey } from '../utils/accountStorage';
 import { CapturedPhoto, FlashMode, CameraMode } from '../types';
 import { playShutterSound } from '../utils/audio';
 import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
-import { RecentPhotosModal } from './RecentPhotosModal';
 
 const CAMERA_MODES: CameraMode[] = ['PPT/판서', '강의노트', '교재', '문서'];
 
@@ -56,7 +55,6 @@ const IosCameraForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) => {
   const [shutterFlash, setShutterFlash] = useState<boolean>(false);
 
   // UI Modals & Toasts
-  const [isRecentModalOpen, setIsRecentModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Focus Indicator State
@@ -358,28 +356,6 @@ const IosCameraForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) => {
 
       {/* Main iOS Bottom Control Bar */}
       <div className="relative z-20 bg-black pt-3 pb-10 px-8 flex items-center justify-between">
-        {/* Left Button: Recent Photo Thumbnail Preview Button */}
-        <button
-          onClick={() => setIsRecentModalOpen(true)}
-          className="relative w-20 h-20 rounded-full bg-neutral-900 border-4 border-neutral-700/60 flex items-center justify-center overflow-hidden transition-transform active:scale-95 group shadow-2xl"
-          title="최근 사진 보기"
-        >
-          {latestPhoto ? (
-            <div className="relative w-full h-full">
-              <img src={latestPhoto.dataUrl} alt="Recent photo" className="w-full h-full object-cover" />
-              {photos.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-[#588157] text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-black">
-                  {photos.length}
-                </span>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center text-neutral-500 group-hover:text-neutral-300">
-              <CameraIcon className="w-7 h-7 stroke-[1.5]" />
-              <span className="text-[10px] mt-0.5">사진</span>
-            </div>
-          )}
-        </button>
 
         {/* Center Button: Circular iOS Camera Shutter Button */}
         <button
@@ -408,13 +384,6 @@ const IosCameraForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) => {
 
 
 
-      {/* Recent Photos View Modal */}
-      <RecentPhotosModal
-        isOpen={isRecentModalOpen}
-        onClose={() => setIsRecentModalOpen(false)}
-        photos={photos}
-        onDeletePhoto={handleDeletePhoto}
-      />
     </div>
   );
 };

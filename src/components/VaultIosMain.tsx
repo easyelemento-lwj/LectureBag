@@ -26,7 +26,6 @@ import {
   Pause,
   Play,
   Volume2,
-  Activity,
   Radio,
   MoreHorizontal
 } from 'lucide-react';
@@ -35,8 +34,6 @@ import { accountKey } from '../utils/accountStorage';
 import { CapturedPhoto, FlashMode, RecordedAudio } from '../types';
 import { playShutterSound } from '../utils/audio';
 import { useAccentColor } from '../context/AccentColorContext';
-import { RecentPhotosModal } from './RecentPhotosModal';
-import { RecentRecordingsModal } from './RecentRecordingsModal';
 import { FolderExplorerModal } from './FolderExplorerModal';
 
 export const VaultIosMain: React.FC = () => {
@@ -111,8 +108,6 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
 
   // Modal & Camera States
   const [isCameraOpen, setIsCameraOpen] = useState<boolean>(false);
-  const [isRecentModalOpen, setIsRecentModalOpen] = useState<boolean>(false);
-  const [isRecentRecordingsModalOpen, setIsRecentRecordingsModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [flashMode, setFlashMode] = useState<FlashMode>('off');
   const [aspectRatio, setAspectRatio] = useState<'4:3' | '16:9' | '1:1'>('4:3');
@@ -520,17 +515,6 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
               </div>
             </div>
 
-            {/* Bottom Minimal Info */}
-            <div className="text-[10px] text-neutral-500 flex items-center gap-1.5 font-mono">
-              <Activity className="w-3 h-3 text-neutral-400" />
-              <span>
-                {isRecording
-                  ? isPaused
-                    ? '녹음 일시정지됨'
-                    : '실시간 오디오 수집 중'
-                  : '음성 녹음 대기 중 (저장 완료)'}
-              </span>
-            </div>
           </div>
         ) : (
           /* Normal Camera Viewport Mode */
@@ -665,28 +649,6 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
 
 
 
-            {/* Camera Status Indicator Dot */}
-            <div
-              className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-[11px] font-medium shadow-md"
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  cameraStatus === 'live'
-                    ? 'bg-green-400 animate-pulse'
-                    : cameraStatus === 'loading'
-                    ? 'bg-yellow-400 animate-pulse'
-                    : 'bg-red-500'
-                }`}
-              />
-              <span className="text-neutral-300">
-                {cameraStatus === 'live'
-                  ? '카메라 연결됨'
-                  : cameraStatus === 'loading'
-                  ? '카메라 연결 중...'
-                  : '카메라 오프라인'}
-              </span>
-            </div>
-
             {/* Bottom Mode Pill */}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-neutral-900/80 backdrop-blur-md px-3 py-1 rounded-full border border-white/15 text-[11px] font-medium flex items-center gap-1.5 shadow-md" style={{ color: accentColor }}>
               <Sparkles className="w-3 h-3" style={{ color: accentColor }} />
@@ -702,20 +664,6 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
           isRecording ? (
             /* Recording Active Mode Toolbar (4 Buttons) */
             <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-xl rounded-full px-5 py-2 flex items-center justify-between gap-5">
-              
-              {/* Button 1 (Far Left): Recent Recordings Button */}
-              <button
-                onClick={() => setIsRecentRecordingsModalOpen(true)}
-                className="w-12 h-12 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 flex items-center justify-center text-[#333333] hover:text-black active:scale-90 transition-all shadow-md relative"
-                title="최근 녹음 파일"
-              >
-                <Volume2 className="w-5 h-5 text-[#333333] stroke-[2]" />
-                {recordings.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-black text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border border-white">
-                    {recordings.length}
-                  </span>
-                )}
-              </button>
 
               {/* Button 2: Pause / Resume Toggle Button */}
               <button
@@ -752,19 +700,6 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
           ) : (
             /* Audio Mode Idle / Stopped Toolbar */
             <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-xl rounded-full px-6 py-2 flex items-center justify-between gap-6">
-              {/* Left: Recent Recordings Button */}
-              <button
-                onClick={() => setIsRecentRecordingsModalOpen(true)}
-                className="w-12 h-12 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 flex items-center justify-center text-[#333333] hover:text-black active:scale-90 transition-all shadow-lg relative"
-                title="최근 녹음 파일"
-              >
-                <Volume2 className="w-5 h-5 text-[#333333] stroke-[2]" />
-                {recordings.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-black text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border border-white">
-                    {recordings.length}
-                  </span>
-                )}
-              </button>
 
               {/* Center: Record Start Button */}
               <button
@@ -788,20 +723,6 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
         ) : (
           /* Camera Mode Toolbar (3 Buttons) */
           <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 shadow-xl rounded-full px-6 py-2 flex items-center justify-between gap-6">
-            
-            {/* Left: Recent Photos Button */}
-            <button
-              onClick={() => setIsRecentModalOpen(true)}
-              className="w-13 h-13 rounded-full bg-neutral-100 border-2 border-neutral-200 ring-2 ring-neutral-200/60 flex items-center justify-center text-[#333333] hover:text-black active:scale-90 transition-all shadow-lg relative"
-              title="최근 찍은 사진"
-            >
-              <Image className="w-5.5 h-5.5 text-[#333333] stroke-[2]" />
-              {photos.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-black text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border border-white">
-                  {photos.length}
-                </span>
-              )}
-            </button>
 
             {/* Center: Circular Camera Button */}
             <button
@@ -827,21 +748,7 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
 
 
 
-      {/* Recent Photos View Modal */}
-      <RecentPhotosModal
-        isOpen={isRecentModalOpen}
-        onClose={() => setIsRecentModalOpen(false)}
-        photos={photos}
-        onDeletePhoto={handleDeletePhoto}
-      />
 
-      {/* Recent Audio Recordings Modal */}
-      <RecentRecordingsModal
-        isOpen={isRecentRecordingsModalOpen}
-        onClose={() => setIsRecentRecordingsModalOpen(false)}
-        recordings={recordings}
-        onDeleteRecording={handleDeleteRecording}
-      />
 
       {/* Folder Explorer Modal */}
       <FolderExplorerModal
@@ -864,4 +771,3 @@ const VaultIosMainForUser: React.FC<{ uid: string; key?: string }> = ({ uid }) =
     </div>
   );
 };
-

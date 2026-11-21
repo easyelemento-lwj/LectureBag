@@ -8,11 +8,22 @@
     "build": "vite build",
     "build:railway": "vite build --outDir railway_web",
     "preview": "vite preview",
+    "desktop:build": "vite build --mode desktop --outDir desktop/renderer",
+    "desktop:dev": "npm run desktop:build && npm --prefix desktop start",
+    "desktop:test": "npm --prefix desktop test",
+    "desktop:pack": "npm run desktop:build && npm --prefix desktop run pack",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "android:sync": "vite build --mode android --outDir mobile-dist && cap sync android",
+    "android:open": "cap open android",
+    "android:apk": "npm run android:sync && node scripts/android_build.mjs assembleDebug",
+    "android:bundle": "npm run android:sync && node scripts/android_build.mjs bundleRelease",
+    "android:check": "node scripts/android_build.mjs lintDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^17.2.3",
@@ -22,9 +33,10 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
+    "vite": "^6.4.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
@@ -32,6 +44,11 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.4.5"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6",
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
   }
 }

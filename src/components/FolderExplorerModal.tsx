@@ -1,6 +1,19 @@
 import { dataUrlFileSize } from '../utils/fileSize';
+import { downloadFiles } from '../utils/downloadFiles';
 import { StorageModeGuide } from './StorageModeGuide';
+import { TimetableClassTimes } from './TimetableClassTimes';
+import { updateTimetableTime } from '../utils/timetableTime';
+import { countTimetableSubjects } from '../utils/timetableSubjects';
 import { DriveConnectionPanel } from './DriveConnectionPanel';
+import { SyncMessagePreview } from './SyncMessagePreview';
+import { DriveTrashStatus } from './DriveTrashStatus';
+import { usePcExplorerMedia } from '../hooks/usePcExplorerMedia';
+import { useCloudFileOpen } from '../hooks/useCloudFileOpen';
+import { useDriveLifecycle } from '../context/DriveLifecycleContext';
+import { InlineRecordingPlayer } from './InlineRecordingPlayer';
+import { transcript } from '../services/transcription';
+import { RECORDING_ENABLED } from '../utils/featureFlags';
+import { ExplorerPhotoPreview } from './ExplorerPhotoPreview';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import {
@@ -17,7 +30,6 @@ import {
   Image as ImageIcon,
   Mic,
   Play,
-  Pause,
   FileText,
   Plus,
   Check,
@@ -50,10 +62,12 @@ import { trashExpiresAt } from '../utils/trash';
 import { accountKey, documentKey } from '../utils/accountStorage';
 import { useTrash } from '../context/TrashContext';
 import { useAccentColor } from '../context/AccentColorContext';
-import { analyzeTimetableImage, generateAiSummary } from '../utils/gemini';
-import { AiJob, listJobs, saveNewJob, removeJob, runJob, jobMarkdown } from '../utils/aiJobs';
+import { analyzeTimetableImage } from '../utils/gemini';
+import { FeedbackPanel } from './FeedbackPanel';
+import { PolicyPanel } from './PolicyPanel';
 import { MarkdownViewer } from './MarkdownViewer';
 import { useAuth } from '../hooks/useAuth';
+import { isFeedbackAdminAccount } from '../utils/adminAccess';
 import type { TutorialStep, TutorialSection } from './AppTutorial';
 import { tutorialFiles } from './tutorialFixtures';
 
@@ -103,6 +117,7 @@ interface FolderExplorerModalProps {
   setStorageMode: React.Dispatch<React.SetStateAction<'default' | 'timetable'>>;
   timetables: SemesterTimetable[];
   setTimetables: React.Dispatch<React.SetStateAction<SemesterTimetable[]>>;
+  timetableSync: import('../hooks/useAccountTimetable').TimetableSync;
 }
 
 // ── Custom iOS Floating Glassmorphism Calendar Popover ────────────────────────
@@ -567,10 +582,17 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   storageMode: savedStorageMode,
   setStorageMode,
   timetables,
-  setTimetables
+  setTimetables,
+  timetableSync
 }) => {
   const { user, signInWithGoogle, signOut } = useAuth();
+  const isFeedbackAdmin = isFeedbackAdminAccount(user);
+  const [signingOut, setSigningOut] = useState(false);
   const uid = user?.uid ?? 'guest';
+  const pcOnly = !canCapture && !tutorialStep && import.meta.env.VITE_DRIVE_INTERNAL_PREVIEW === 'true';
+  const pc = usePcExplorerMedia(pcOnly);
+  const lifecycle = useDriveLifecycle();
+  const prepareCloudFile = useCloudFileOpen();
   const { entries: trashEntries, moveToTrash, restore, permanentlyDelete } = useTrash();
   const [trashBusy, setTrashBusy] = useState(false);
   const deletedEntries = tutorialStep ? [] : trashEntries.filter(entry => !entry.restored && !entry.purged)
@@ -596,14 +618,16 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<boolean>(false);
   const [isTutorialPickerOpen, setIsTutorialPickerOpen] = useState(false);
   const [savedIsSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [savedActiveSettingDetail, setActiveSettingDetail] = useState<'profile' | 'timetable' | 'ai_center' | 'ai_process' | 'trash' | 'settings' | 'about' | null>(null);
+  const [savedActiveSettingDetail, setActiveSettingDetail] = useState<'profile' | 'timetable' | 'trash' | 'settings' | 'about' | 'sync_preview' | 'drive' | 'feedback' | 'developer' | 'terms' | 'privacy' | null>(null);
 
 
   useEffect(() => {
     if (isOpen && savedIsSettingsOpen && !tutorialStep) onEnterAppCenter?.();
   }, [isOpen, savedIsSettingsOpen, tutorialStep, onEnterAppCenter]);
   const isSettingsOpen = tutorialStep ? tutorialStep.chapter >= 7 : savedIsSettingsOpen;
-  const activeSettingDetail = tutorialStep ? (tutorialStep.chapter === 8 ? 'timetable' : tutorialStep.chapter === 9 ? 'ai_center' : null) : savedActiveSettingDetail;
+  const activeSettingDetail = tutorialStep ? (tutorialStep.chapter === 8 ? 'timetable' : null)
+    : !isFeedbackAdmin && (savedActiveSettingDetail === 'developer' || savedActiveSettingDetail === 'sync_preview')
+      ? 'settings' : savedActiveSettingDetail;
 
   const [timetableNotice, setTimetableNotice] = useState<{ message: string } | null>(null);
 
@@ -635,21 +659,28 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const [isReorderMode, setIsReorderMode] = useState<boolean>(false);
   const [reorderEntries, setReorderEntries] = useState<Array<{ id: string; type: 'bundle' | 'single'; files: MediaFile[] }>>([]);
   const [savedSelectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [downloadNotice, setDownloadNotice] = useState('');
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [preparedDownloads, setPreparedDownloads] = useState<Array<MediaFile & { text?: string }>>([]);
+  const finishSelection = () => {
+    setSelectedItemIds([]);
+    setIsSelectionMode(false);
+    setIsReorderMode(false);
+    setReorderEntries([]);
+    setPreparedDownloads([]);
+  };
+  const finishDownload = (message: string) => {
+    setDownloadNotice(message);
+    if (message !== '저장을 취소했습니다.') finishSelection();
+  };
   const isSelectionMode = tutorialStep ? tutorialStep.chapter === 6 && Boolean(tutorialStep.selected) : savedIsSelectionMode;
   const selectedItemIds = tutorialStep ? tutorialFiles.slice(0, tutorialStep.selected ?? 0).map(file => file.id) : savedSelectedItemIds;
-  const [isAiStartingBubbleOpen, setIsAiStartingBubbleOpen] = useState<boolean>(false);
 
   // Rename & Info Modal States for AI Documents
   const [renameModalItem, setRenameModalItem] = useState<MediaFile | null>(null);
   const [newDocName, setNewDocName] = useState<string>('');
   const [infoModalItem, setInfoModalItem] = useState<MediaFile | null>(null);
 
-  // AI Processing Session State (Only active processing items remain here)
-  const aiSessionRunners = useRef(new Map<string, () => Promise<void>>());
-  const aiControllers = useRef(new Map<string, AbortController>());
-  const [aiSessions, setAiSessions] = useState<AiJob[]>([]);
-
-  // Actual processing happens inside startAiSummaryProcess
 
   // Dynamic media files list combining photos & audio & documents
   const [savedMediaList, setMediaList] = useState<MediaFile[]>(() => [
@@ -661,18 +692,26 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const mediaList = useMemo(() => {
     if (tutorialStep) return tutorialFiles;
     const deletedIds = new Set(trashEntries.filter(entry => !entry.restored).map(entry => entry.file.id));
+    if (pcOnly) return pc.media.filter(file => !deletedIds.has(file.id));
     const existingIds = new Set(savedMediaList.map(file => file.id));
     return [...savedMediaList, ...trashEntries.filter(entry => entry.restored && !existingIds.has(entry.file.id)).map(entry => entry.file)]
       .filter(file => !deletedIds.has(file.id))
       .map(file => file.type === 'photo' && file.dataUrl ? { ...file, fileSize: dataUrlFileSize(file.dataUrl) } : file);
-  }, [tutorialStep, savedMediaList, trashEntries]);
+  }, [tutorialStep, savedMediaList, trashEntries, pcOnly, pc.media]);
+
+  useEffect(() => {
+    // Folder markers do not count as selected files. Also handles remote deletion.
+    if (!tutorialStep && savedIsSelectionMode && !mediaList.some(file => savedSelectedItemIds.includes(file.id))) {
+      finishSelection();
+    }
+  }, [tutorialStep, savedIsSelectionMode, savedSelectedItemIds, mediaList]);
 
   const trashFiles = async (files: MediaFile[]) => {
     if (tutorialStep || trashBusy) return false;
     setTrashBusy(true);
     try {
       const saved = await moveToTrash(files);
-      if (saved) setSelectedItemIds(prev => prev.filter(id => !files.some(file => file.id === id)));
+      if (saved) finishSelection();
       return saved;
     } finally { setTrashBusy(false); }
   };
@@ -685,7 +724,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
   const deleteTrashFile = async (file: MediaFile) => {
     if (tutorialStep || trashBusy) return;
-    if (!window.confirm(`“${file.name}”을 영구 삭제하시겠습니까? 삭제 후에는 복원할 수 없습니다.`)) return;
     setTrashBusy(true);
     try { await permanentlyDelete([file.id]); } finally { setTrashBusy(false); }
   };
@@ -696,7 +734,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       const purgedIds = new Set(trashEntries.filter(entry => entry.purged).map(entry => entry.file.id));
       const remaining = prev.filter(file => !purgedIds.has(file.id));
       const ids = new Set(remaining.map(file => file.id));
-      const missing = trashEntries.filter(entry => entry.restored && !ids.has(entry.file.id)).map(entry => entry.file);
+      const missing = trashEntries.filter(entry => entry.restored && !entry.cloud && !ids.has(entry.file.id)).map(entry => entry.file);
       return missing.length || remaining.length !== prev.length ? [...missing, ...remaining] : prev;
     });
   }, [trashEntries, tutorialStep]);
@@ -752,12 +790,38 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   }, [mediaList, selectedFileIds]);
 
   const hasSelectedAiDocs = selectedAiDocs.length > 0;
-  const selectedMediaCount = activeSettingDetail === 'ai_center' ? selectedAiDocs.length : selectedExplorerFiles.length;
+  const selectedMediaCount = selectedExplorerFiles.length;
+  const [transcribing, setTranscribing] = useState(false);
+  const onlyRecordings = selectedFileIds.length > 0 && selectedFileIds.every(id => mediaList.some(file => file.id === id && file.type === 'audio')) && selectedItemIds.every(id => selectedFileIds.includes(id));
+  async function transcribeSelected() {
+    if (!RECORDING_ENABLED || transcribing || !onlyRecordings || tutorialStep) return;
+    const files = mediaList.filter(file => selectedFileIds.includes(file.id));
+    if (!window.confirm(`선택한 녹음 ${files.length}개를 외부 음성 인식 서비스로 전송해 원문 텍스트로 변환합니다. 사용량에 따른 비용이 발생할 수 있습니다. 계속할까요?`)) return;
+    setTranscribing(true);
+    let completed = 0;
+    const errors: string[] = [];
+    try {
+      for (const file of files) {
+        setDownloadNotice(`텍스트 변환 중 · ${completed}/${files.length}개 완료`);
+        try {
+          if (!await transcript(file.id)) {
+            const prepared = await prepareCloudFile(file);
+            if (!prepared.dataUrl) throw new Error('녹음 원본을 먼저 동기화해 주세요.');
+            const audio = await (await fetch(prepared.dataUrl)).blob();
+            await transcript(file.id, audio);
+          }
+          completed++;
+        } catch (error) { errors.push(`${file.name}: ${error instanceof Error ? error.message : '변환 실패'}`); }
+      }
+      setDownloadNotice(`텍스트 변환 ${completed}개 완료${errors.length ? ` · ${errors.join(' / ')}` : '. 녹음 재생 바의 Aa 버튼으로 확인하세요.'}`);
+    } finally { setTranscribing(false); }
+  }
 
   // True only when the folder has no subfolders (i.e. inside the deepest level containing individual files)
   const isTerminalFolder = activeSettingDetail === null && ((storageMode === 'default' && navPath.length === 4) || (storageMode === 'timetable' && navPath.length === 5));
 
   const handleSaveNewName = () => {
+    if (pcOnly) { showToast('동기화 자료 이름 변경은 아직 지원하지 않습니다.'); return; }
     if (!renameModalItem) return;
     const trimmed = newDocName.trim();
     if (!trimmed) {
@@ -765,102 +829,16 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
       return;
     }
     const finalName = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
-    setMediaList((prev) => {
-      const updated = prev.map((m) => (m.id === renameModalItem.id ? { ...m, name: finalName } : m));
-      const aiOnly = updated.filter((item) => item.type === 'document' || item.name.endsWith('.md'));
-      try {
-        localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(aiOnly));
-      } catch (e) {
-        console.error(e);
-      }
-      return updated;
-    });
+    const updated = savedMediaList.map(m => m.id === renameModalItem.id ? { ...m, name: finalName } : m);
+    try {
+      localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(updated.filter(item => item.type === 'document' || item.name.endsWith('.md'))));
+    } catch { showToast('이름을 저장하지 못했습니다. 저장 공간을 확인해 주세요.'); return; }
+    setMediaList(updated);
     showToast(`문서 이름이 '${finalName}'(으)로 변경되었습니다.`);
     setRenameModalItem(null);
+    finishSelection();
   };
 
-  const registerAiJob = (job: AiJob) => {
-    const run = async () => {
-      if (aiControllers.current.has(job.id)) return;
-      const controller = new AbortController();
-      aiControllers.current.set(job.id, controller);
-      const execute = async () => {
-        // Re-read after acquiring the browser lock so another tab's checkpoints win.
-        const latest = (await listJobs(uid)).find(item => item.id === job.id);
-        if (!latest || controller.signal.aborted) return;
-        await runJob(uid, latest, {
-          signal: controller.signal,
-          summarize: generateAiSummary,
-          changed: value => setAiSessions(prev => prev.map(item => item.id === value.id ? value : item)),
-          complete: async (value, markdown) => {
-            if (controller.signal.aborted) return;
-            const doc: MediaFile = {
-              id: `ai_doc_${value.id}`, type: 'document', name: value.resultFileName,
-              fileSize: `${(new Blob([markdown]).size / 1024).toFixed(1)} KB`, timestamp: new Date(),
-              mode: 'AI 스마트 요약노트', sourceFileNames: value.fileNames,
-            };
-            localStorage.setItem(documentKey(uid, doc.id), markdown);
-            const docs = [doc, ...getPersistedAiDocs(uid).filter(item => item.id !== doc.id)];
-            localStorage.setItem(accountKey(uid, 'ai_docs'), JSON.stringify(docs));
-            setMediaList(prev => [doc, ...prev.filter(item => item.id !== doc.id)]);
-            showToast(`🎉 [${value.resultFileName}] AI 센터에 저장되었습니다!`);
-          },
-        });
-      };
-      try {
-        if (navigator.locks) {
-          await navigator.locks.request(accountKey(uid, `ai_job:${job.id}`), { signal: controller.signal }, execute);
-        } else await execute();
-      } catch (error) {
-        if (!controller.signal.aborted) showToast(`AI 작업을 불러오지 못했습니다: ${(error as Error).message}`);
-      } finally { aiControllers.current.delete(job.id); }
-    };
-    aiSessionRunners.current.set(job.id, run);
-    return run;
-  };
-
-  useEffect(() => {
-    let active = true;
-    void listJobs(uid).then(jobs => {
-      if (!active) return;
-      const pending = jobs.map(job => ({ ...job, status: 'error' as const,
-        currentStep: `${job.files.filter(file => file.summary !== undefined).length}/${job.fileCount}개 완료 · 저장된 작업입니다. 이어서 시도하면 남은 파일을 처리합니다.` }));
-      setAiSessions(prev => [...prev, ...pending.filter(job => !prev.some(item => item.id === job.id))]);
-      pending.forEach(registerAiJob);
-    }).catch(() => { if (active) showToast('저장된 AI 작업을 불러오지 못했습니다. 기기 저장 공간을 확인해주세요.'); });
-    return () => {
-      active = false;
-      aiControllers.current.forEach(controller => controller.abort());
-      aiControllers.current.clear();
-      aiSessionRunners.current.clear();
-    };
-  }, [uid]);
-
-  const startAiSummaryProcess = async () => {
-    const files = [...selectedExplorerFiles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    if (!files.length) return;
-    setIsAiStartingBubbleOpen(true);
-    const date = new Date();
-    const title = `${date.toISOString().slice(0, 10)}_${files[0].name.replace(/\.[^/.]+$/, '')}${files.length > 1 ? `_외_${files.length - 1}개` : ''}`;
-    const job: AiJob = {
-      id: `session_${crypto.randomUUID()}`, title, fileCount: files.length, fileNames: files.map(file => file.name),
-      startTime: date.toTimeString().slice(0, 5), progress: 0, status: 'processing', currentStep: '분석 준비 중...',
-      resultFileName: `${title}_요약.md`, resultSize: '', summarySnippet: '',
-      files: files.map(file => ({ name: file.name, dataUrl: file.dataUrl })),
-    };
-    try {
-      await saveNewJob(uid, job);
-      setAiSessions(prev => [job, ...prev]);
-      setSelectedItemIds([]);
-      setIsSelectionMode(false);
-      setIsReorderMode(false);
-      setIsSettingsOpen(true);
-      setActiveSettingDetail('ai_process');
-      void registerAiJob(job)();
-    } catch {
-      showToast('작업을 저장하지 못했습니다. 기기 저장 공간을 확인한 후 다시 시도해주세요.');
-    } finally { setIsAiStartingBubbleOpen(false); }
-  };
 
   const toggleSelectItem = (id: string) => {
     setSelectedItemIds((prev) =>
@@ -1148,6 +1126,25 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [previewPhoto, setPreviewPhoto] = useState<MediaFile | null>(null);
   const [previewDoc, setPreviewDoc] = useState<MediaFile | null>(null);
+  const [pcAudio, setPcAudio] = useState<MediaFile | null>(null);
+  const openPhoto = async (file: MediaFile) => {
+    if (lifecycle.files.some(f => f.id === file.id && (f.driveUnavailable || f.deletedAt))) { showToast('Drive 원본 상태를 확인해 주세요.'); return; }
+    if (pcOnly || file.dataUrl) { setPreviewPhoto(file); return; }
+    showToast('Drive 원본을 불러오는 중입니다…');
+    try { setPreviewPhoto(await prepareCloudFile(file)); }
+    catch (error) { showToast(error instanceof Error ? error.message : '원본을 불러오지 못했습니다.'); }
+  };
+  useEffect(() => {
+    const hidden = new Set(trashEntries.filter(e => !e.restored || e.cloud?.unavailable).map(e => e.file.id));
+    if (previewPhoto && hidden.has(previewPhoto.id)) setPreviewPhoto(null);
+    if (pcAudio && hidden.has(pcAudio.id)) setPcAudio(null);
+    if (playingAudioId && hidden.has(playingAudioId)) { audioRequest.current++; setPlayingAudioId(null); }
+  }, [trashEntries, previewPhoto, pcAudio, playingAudioId]);
+  useEffect(() => {
+    if (!pcOnly) return;
+    if (previewPhoto && !pc.media.some(f => f.id === previewPhoto.id && f.dataUrl === previewPhoto.dataUrl)) setPreviewPhoto(null);
+    if (pcAudio && !pc.media.some(f => f.id === pcAudio.id && f.dataUrl === pcAudio.dataUrl)) { audioRequest.current++; setPcAudio(null); setPlayingAudioId(null); }
+  }, [pcOnly, pc.media, previewPhoto, pcAudio]);
 
   // Helper to ensure mutually exclusive mode execution (Search, Selection, File Import, Settings, More Menu)
   const closeOtherModes = (activeMode: 'search' | 'selection' | 'fileAdd' | 'settings' | 'moreMenu') => {
@@ -1167,7 +1164,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     if (activeMode !== 'settings' && activeMode !== 'selection') {
       setIsSettingsOpen(false);
       setActiveSettingDetail(null);
-    } else if (activeMode === 'selection' && activeSettingDetail !== 'ai_center') {
+    } else if (activeMode === 'selection') {
       setIsSettingsOpen(false);
       setActiveSettingDetail(null);
     }
@@ -1269,7 +1266,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     setIsReorderMode(false);
     if (completedTutorial.section === 'apps') {
       setIsSettingsOpen(true);
-      setActiveSettingDetail('ai_center');
+      setActiveSettingDetail(null);
     } else if (completedTutorial.section === 'explorer') {
       setIsSettingsOpen(false);
       setActiveSettingDetail(null);
@@ -1734,44 +1731,33 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
     } finally { importSaving.current = false; }
   };
 
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-
+  const audioRequest = useRef(0);
   useEffect(() => {
-    return () => {
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-        audioPlayerRef.current = null;
-      }
-    };
-  }, []);
+    audioRequest.current++; setPlayingAudioId(null); setPcAudio(null);
+    return () => { audioRequest.current++; };
+  }, [isOpen, uid, navPath, isSearchOpen, searchQuery, isSelectionMode, isReorderMode, isSettingsOpen]);
 
-  const handleAudioPlayToggle = (id: string, name: string, dataUrl?: string) => {
-    if (playingAudioId === id) {
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-      }
-      setPlayingAudioId(null);
-      showToast('녹음 재생이 일시정지 되었습니다');
-    } else {
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-      }
-      if (dataUrl) {
-        try {
-          const audio = new Audio(dataUrl);
-          audio.onended = () => setPlayingAudioId(null);
-          audio.onerror = () => setPlayingAudioId(null);
-          audio.play().catch((err) => {
-            console.error('Audio playback error:', err);
-          });
-          audioPlayerRef.current = audio;
-        } catch (e) {
-          console.error(e);
-        }
-      }
-      setPlayingAudioId(id);
-      showToast(`'${name}' 녹음 재생 중...`);
+  const handleAudioPlayToggle = async (id: string, name: string, dataUrl?: string) => {
+    const request = ++audioRequest.current;
+    setPcAudio(null);
+    if (playingAudioId === id) { setPlayingAudioId(null); return; }
+    setPlayingAudioId(id);
+    if (lifecycle.files.some(f => f.id === id && (f.driveUnavailable || f.deletedAt))) { setPlayingAudioId(null); showToast('Drive 원본 상태를 확인해 주세요.'); return; }
+    if (pcOnly) {
+      const file = pc.media.find(f => f.id === id);
+      if (!file?.dataUrl) { setPlayingAudioId(null); showToast('PC 사본을 준비 중입니다. 동기화 후 다시 열어주세요.'); return; }
+      setPcAudio(file); return;
     }
+    if (!dataUrl && lifecycle.files.some(file => file.id === id)) {
+      const file = mediaList.find(f => f.id === id);
+      if (!file) { setPlayingAudioId(null); return; }
+      showToast('Drive 녹음 원본을 불러오는 중입니다…');
+      try { const prepared = await prepareCloudFile(file); if (request === audioRequest.current) setPcAudio(prepared); }
+      catch (error) { if (request === audioRequest.current) { setPlayingAudioId(null); showToast(error instanceof Error ? error.message : '원본을 불러오지 못했습니다.'); } }
+      return;
+    }
+    if (dataUrl) setPcAudio({ id, name, dataUrl, type: 'audio', timestamp: new Date() });
+    else { setPlayingAudioId(null); showToast('녹음 원본을 찾을 수 없습니다.'); }
   };
 
   if (!isOpen) return null;
@@ -1820,7 +1806,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}
         >
           {!canCapture && navPath.length === 0 ? (
-            <img src="/lecturebag-logo.png" alt="LectureBag" className="h-11 w-11 rounded-xl object-contain" />
+            <img src="/lecturebag-logo.png" alt="LectureBag" className="h-11 w-11 object-contain" />
           ) : <button
             onClick={() => {
               if (navPath.length > 0) {
@@ -1837,14 +1823,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
           <div className="flex items-center gap-2.5 relative">
             {/* 플러스 (외부 파일 추가) 버튼 */}
-            <button
+            {!pcOnly && <button
               onClick={handleStartImportingFile}
               className="w-11 h-11 rounded-full bg-[#EFEFEF] hover:bg-[#E2E2E2] flex items-center justify-center text-neutral-700 active:scale-90 transition-transform shadow-2xs"
               data-tour="add"
               title="외부 파일 추가"
             >
               <Plus className="w-5.5 h-5.5 stroke-[2.5]" />
-            </button>
+            </button>}
 
             {/* 돋보기 (Search) 버튼 */}
             <button
@@ -1909,6 +1895,13 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           </div>
         </div>
 
+        {pcOnly && !isSettingsOpen && !pc.sync.library && <div className="flex flex-wrap items-center gap-3 px-5 py-2 text-xs text-neutral-500">
+          {!pc.sync.library && <button className="rounded-xl bg-white px-3 py-2 font-bold" onClick={() => {
+            if (!pc.sync.library && !window.confirm('Drive 자료를 이 PC에 내려받아 보관합니다. 공용 PC에서는 사용하지 마세요. 계속할까요?')) return;
+            pc.sync.start();
+          }} disabled={pc.sync.busy}>이 PC에 자동 보관</button>}
+        </div>}
+        {!tutorialStep && !isSettingsOpen && <DriveTrashStatus />}
         {/* Search Bar Input Container */}
         <AnimatePresence>
           {isSearchOpen && (
@@ -2167,7 +2160,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         </div>
 
         {/* 3. File Type Filter Bubble Bar directly below Vault Bubble */}
-        <div className="px-5 pt-1.5 pb-1.5">
+        {RECORDING_ENABLED && <div className="px-5 pt-1.5 pb-1.5">
           <div data-tour="filters" className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 rounded-2xl p-1.5 shadow-2xs flex items-center justify-between gap-1.5 text-xs">
             <button
               data-tour="all"
@@ -2205,7 +2198,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               <span>녹음</span>
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* 4. Main Folder Navigation & List Layout Content View */}
         <div className="flex-1 overflow-y-auto px-5 pt-1.5 pb-3 space-y-3 scrollbar-none">
@@ -2248,13 +2241,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     const photoSrc = item.dataUrl || item.url;
 
                     return (
+                      <div key={item.id} className={`min-w-0 ${playingAudioId === item.id ? 'col-span-full' : ''}`}>
                       <HoldableFileCard
                         key={item.id}
                         isSelectionMode={isSelectionMode}
                         onSelect={() => handleFileHoldSelect(item.id)}
                         onClickNormal={() => {
                           if (isPhoto) {
-                            setPreviewPhoto(item);
+                            void openPhoto(item);
                           } else if (isAudio) {
                             handleAudioPlayToggle(item.id, item.name, item.dataUrl);
                           } else {
@@ -2289,12 +2283,12 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               }}
                               className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all active:scale-90 ${
                                 playingAudioId === item.id
-                                  ? 'bg-neutral-800 text-white animate-pulse'
+                                  ? 'bg-neutral-800 text-white'
                                   : 'bg-neutral-100 text-neutral-700 border border-neutral-200'
                               }`}
                             >
                               {playingAudioId === item.id ? (
-                                <Pause className="w-5 h-5 fill-current" />
+                                <ChevronDown aria-label="녹음 플레이어 닫기" className="w-5 h-5 rotate-180" />
                               ) : (
                                 <Play className="w-5 h-5 fill-current ml-0.5" />
                               )}
@@ -2324,6 +2318,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           </div>
                         </div>
                       </HoldableFileCard>
+                      {playingAudioId === item.id && <InlineRecordingPlayer fileId={item.id} fileName={item.name} source={pcAudio?.id === item.id ? pcAudio.dataUrl : undefined} />}
+                      </div>
                     );
                   })}
                 </div>
@@ -2344,17 +2340,17 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     <p className="text-xs text-neutral-500 mt-1 max-w-xs mx-auto">
                       {canCapture
                         ? '새로운 강의 사진 촬영이나 녹음을 진행하시면 촬영/녹음 날짜 기준의 연도, 학기, 월, 일자 폴더가 자동으로 생성됩니다.'
-                        : 'PC에 있는 사진과 녹음 파일을 가져오세요. 파일 날짜와 선택한 정리 방식에 맞춰 폴더가 자동으로 생성됩니다.'}
+                        : pcOnly ? '앱 센터에서 Drive를 연결하고 자동 보관을 켜주세요. 동기화한 자료가 기존 날짜별 폴더에 표시됩니다.' : 'PC에 있는 사진과 녹음 파일을 가져오세요. 파일 날짜와 선택한 정리 방식에 맞춰 폴더가 자동으로 생성됩니다.'}
                     </p>
                   </div>
-                  <div className="pt-2 flex justify-center gap-2">
+                  {!pcOnly && <div className="pt-2 flex justify-center gap-2">
                     <button
                       onClick={handleStartImportingFile}
                       className="px-4 py-2 bg-neutral-900 text-white rounded-xl text-xs font-semibold hover:bg-neutral-800 active:scale-95 transition-all shadow-xs"
                     >
                       + 외부 파일 가져오기
                     </button>
-                  </div>
+                  </div>}
                 </div>
               ) : (
                 dynamicYears.map((yr) => {
@@ -2909,20 +2905,21 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     });
 
                     return (
+                      <div key={item.id} className={`min-w-0 ${playingAudioId === item.id ? 'col-span-full' : ''}`}>
                       <HoldableFileCard
                         key={item.id}
                         isSelectionMode={isSelectionMode}
                         onSelect={() => handleFileHoldSelect(item.id)}
                         onClickNormal={() => {
                           if (isPhoto) {
-                            setPreviewPhoto(item);
+                            void openPhoto(item);
                           } else if (isAudio) {
                             handleAudioPlayToggle(item.id, item.name, item.dataUrl);
                           } else {
                             setPreviewDoc(item);
                           }
                         }}
-                        className={`h-full p-3.5 rounded-2xl border transition-all flex items-center justify-between shadow-2xs text-neutral-800 cursor-pointer ${
+                        className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between shadow-2xs text-neutral-800 cursor-pointer ${
                           isSelected
                             ? 'border-neutral-900 bg-neutral-50 shadow-xs'
                             : newlyUploadedIds.includes(item.id)
@@ -2946,7 +2943,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                 onClick={(e) => {
                                   if (!isSelectionMode) {
                                     e.stopPropagation();
-                                    setPreviewPhoto(item);
+                                    void openPhoto(item);
                                   }
                                 }}
                                 className="w-10 h-10 rounded-xl object-cover flex-shrink-0 border border-neutral-200 cursor-pointer shadow-xs active:scale-95"
@@ -2969,12 +2966,12 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               }}
                               className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all active:scale-90 ${
                                 playingAudioId === item.id
-                                  ? 'bg-neutral-800 text-white animate-pulse'
+                                  ? 'bg-neutral-800 text-white'
                                   : 'bg-neutral-100 text-neutral-700 border border-neutral-200'
                               }`}
                             >
                               {playingAudioId === item.id ? (
-                                <Pause className="w-5 h-5 fill-current" />
+                                <ChevronDown aria-label="녹음 플레이어 닫기" className="w-5 h-5 rotate-180" />
                               ) : (
                                 <Play className="w-5 h-5 fill-current ml-0.5" />
                               )}
@@ -3004,6 +3001,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           </div>
                         </div>
                       </HoldableFileCard>
+                      {playingAudioId === item.id && <InlineRecordingPlayer fileId={item.id} fileName={item.name} source={pcAudio?.id === item.id ? pcAudio.dataUrl : undefined} />}
+                      </div>
                     );
                   })
                 )}
@@ -3056,8 +3055,14 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               >
                 <button
                   onClick={() => {
-                    if (activeSettingDetail === 'ai_process') {
-                      setActiveSettingDetail('ai_center');
+                    if (activeSettingDetail === 'profile' && import.meta.env.VITE_DRIVE_INTERNAL_PREVIEW === 'true') {
+                      setActiveSettingDetail('drive');
+                    } else if (activeSettingDetail === 'sync_preview') {
+                      setActiveSettingDetail('developer');
+                    } else if (activeSettingDetail === 'terms' || activeSettingDetail === 'privacy') {
+                      setActiveSettingDetail('about');
+                    } else if (activeSettingDetail === 'developer') {
+                      setActiveSettingDetail('settings');
                     } else if (activeSettingDetail) {
                       setActiveSettingDetail(null);
                     } else {
@@ -3074,16 +3079,24 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                     ? '회원정보'
                     : activeSettingDetail === 'timetable'
                     ? '시간표 등록'
-                    : activeSettingDetail === 'ai_center'
-                    ? 'AI 센터'
-                    : activeSettingDetail === 'ai_process'
-                    ? 'AI 프로세스 현황'
                     : activeSettingDetail === 'trash'
                     ? '쓰레기통'
                     : activeSettingDetail === 'settings'
                     ? '환경설정'
                     : activeSettingDetail === 'about'
                     ? '앱 설명'
+                    : activeSettingDetail === 'drive'
+                    ? 'Google Drive'
+                    : activeSettingDetail === 'sync_preview'
+                    ? '안내 메시지 미리보기'
+                    : activeSettingDetail === 'feedback'
+                    ? '한줄평 남기기'
+                    : activeSettingDetail === 'developer'
+                    ? '개발자 페이지'
+                    : activeSettingDetail === 'terms'
+                    ? '이용약관'
+                    : activeSettingDetail === 'privacy'
+                    ? '개인정보 처리방침'
                     : 'APP CENTRE'}
                 </h3>
                 <button
@@ -3100,20 +3113,12 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
               {/* Settings Main Content List */}
               <div className="flex-1 overflow-y-auto px-5 pt-3 pb-4 space-y-4">
-                {activeSettingDetail === null && (
-                  <div className="space-y-3">
-                    <p className="text-[11px] font-bold text-neutral-400 px-1 tracking-wider uppercase">
-                      계정 및 앱 관리
-                    </p>
-
-                    {/* Grouped Settings List */}
-                    {import.meta.env.VITE_DRIVE_INTERNAL_PREVIEW === 'true' && <DriveConnectionPanel />}
-                    <div className="bg-white rounded-2xl border border-neutral-200/80 divide-y divide-neutral-100 shadow-2xs overflow-hidden">
+                {activeSettingDetail === 'feedback' && <FeedbackPanel />}
+                {activeSettingDetail === 'sync_preview' && <SyncMessagePreview />}
+                {import.meta.env.VITE_DRIVE_INTERNAL_PREVIEW === 'true' && activeSettingDetail === 'drive' && <DriveConnectionPanel management>
+                  <div className="-mx-5 -mb-5 mt-4 overflow-hidden rounded-b-3xl border-t border-neutral-100 bg-white">
                       {/* 1. 회원정보 (User Profile) */}
-                      <button
-                        onClick={() => setActiveSettingDetail('profile')}
-                        className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
-                      >
+                      <div className="w-full p-5 text-left">
                         <div className="flex items-center gap-3">
                           {user?.photoURL ? (
                             <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl object-cover shadow-sm" />
@@ -3129,8 +3134,29 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                             </p>
                           </div>
                         </div>
-                        <ChevronRight className="w-4 h-4 text-neutral-400" />
-                      </button>
+                      </div>
+                    <div className="px-5 py-4">
+                      <button type="button" disabled={signingOut} onClick={async () => {
+                        setSigningOut(true);
+                        try { await signOut(); setActiveSettingDetail(null); setIsSettingsOpen(false); showToast('로그아웃 되었습니다.'); }
+                        catch { showToast('로그아웃하지 못했습니다. 다시 시도해 주세요.'); }
+                        finally { setSigningOut(false); }
+                      }} className="min-h-11 rounded-full bg-[#EFEFEF] px-4 text-xs text-neutral-700 enabled:hover:bg-[#E2E2E2] enabled:active:bg-[#E2E2E2] enabled:active:scale-90 transition-[background-color,transform] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500 disabled:opacity-50">{signingOut ? '로그아웃 중…' : '로그아웃'}</button>
+                    </div>
+                  </div>
+                </DriveConnectionPanel>}
+                {activeSettingDetail === null && (
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-bold text-neutral-400 px-1 tracking-wider uppercase">
+                      계정 및 앱 관리
+                    </p>
+
+                    {/* Grouped Settings List */}
+                    <button type="button" onClick={() => setActiveSettingDetail('feedback')} className="flex min-h-16 w-full items-center justify-between gap-3 rounded-2xl border border-neutral-200/80 bg-white p-4 text-left hover:bg-neutral-50 active:bg-neutral-100">
+                      <div><p className="text-sm font-semibold">한줄평 남기기</p><p className="mt-1 text-xs text-neutral-500">별점과 짧은 의견을 보내주세요.</p></div><ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+                    </button>
+                    {import.meta.env.VITE_DRIVE_INTERNAL_PREVIEW === 'true' && <DriveConnectionPanel onOpen={() => setActiveSettingDetail('drive')} />}
+                    <div className="bg-white rounded-2xl border border-neutral-200/80 divide-y divide-neutral-100 shadow-2xs overflow-hidden">
 
                       {/* 2. 시간표 등록 (Timetable Registration) */}
                       <button
@@ -3152,25 +3178,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         <ChevronRight className="w-4 h-4 text-neutral-400" />
                       </button>
 
-                      {/* 3. AI 센터 (AI Center) */}
-                      <button
-                        data-tour="aiCenter"
-                        onClick={() => setActiveSettingDetail('ai_center')}
-                        className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
-                            <Sparkles className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-bold text-neutral-900">AI 센터</h4>
-                            <p className="text-[11px] text-neutral-400 mt-0.5">
-                              사진/음성 AI 정리 요약 및 마크다운 생성 설정
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-neutral-400" />
-                      </button>
 
                       <button
                         onClick={() => setActiveSettingDetail('trash')}
@@ -3233,17 +3240,24 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3 px-1">
                       <p className="text-xs text-neutral-500">보관 중인 항목 {deletedEntries.length}개</p>
-                      {deletedEntries.length > 0 && <button disabled={trashBusy} onClick={() => restoreFiles(deletedEntries.map(entry => entry.file.id))}
+                      {deletedEntries.length > 0 && <button disabled={trashBusy || deletedEntries.some(e => !!e.cloud?.pending || e.cloud?.unavailable)} onClick={async () => {
+                        if (tutorialStep || trashBusy) return;
+                        setTrashBusy(true);
+                        try { await permanentlyDelete(deletedEntries.map(entry => entry.file.id)); } finally { setTrashBusy(false); }
+                      }} className="ml-auto text-xs font-bold text-rose-600 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 disabled:opacity-40">전체 삭제</button>}
+                      {deletedEntries.length > 0 && <button disabled={trashBusy || deletedEntries.some(e => !!e.cloud?.pending || e.cloud?.unavailable)} onClick={() => restoreFiles(deletedEntries.map(entry => entry.file.id))}
                         className="text-xs font-bold text-neutral-800 px-3 py-2 rounded-xl bg-white border border-neutral-200 disabled:opacity-40">전체 복원</button>}
                     </div>
-                    <p className="px-1 text-[11px] leading-relaxed text-neutral-400">삭제한 항목은 30일 동안 보관한 뒤 영구 삭제됩니다. 앱이 닫혀 있으면 다음 실행 시 정리됩니다.</p>
+                    <p className="px-1 text-[11px] leading-relaxed text-neutral-500">{lifecycle.enabled
+                      ? '완전 삭제하면 Google Drive 쓰레기통의 원본도 삭제되며 복원할 수 없습니다. 전체 삭제는 이 앱의 쓰레기통에 있는 파일에 적용됩니다.'
+                      : '삭제한 항목은 30일 동안 보관한 뒤 영구 삭제됩니다. 앱이 닫혀 있으면 다음 실행 시 정리됩니다.'}</p>
                     {deletedEntries.length === 0 ? (
                       <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-2xs px-6 py-12 flex flex-col items-center text-center">
                         <div className="w-16 h-16 rounded-2xl bg-neutral-100 text-neutral-400 flex items-center justify-center mb-4">
                           <Trash2 className="w-8 h-8" aria-hidden="true" />
                         </div>
                         <h4 className="text-sm font-bold text-neutral-900">쓰레기통이 비어 있습니다</h4>
-                        <p className="mt-2 text-xs leading-relaxed text-neutral-400">삭제한 사진, 녹음, AI 문서를 여기에서 복원할 수 있습니다.</p>
+                        <p className="mt-2 text-xs leading-relaxed text-neutral-400">삭제한 사진, 녹음, 문서를 여기에서 복원할 수 있습니다.</p>
                       </div>
                     ) : (
                       <div className="bg-white rounded-2xl border border-neutral-200/80 divide-y divide-neutral-100 overflow-hidden">
@@ -3252,19 +3266,31 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           return (
                           <div key={file.id} className="grid grid-cols-[44px_minmax(0,1fr)] items-center gap-3 p-4 sm:grid-cols-[44px_minmax(0,1fr)_auto]">
                             <div className="w-11 h-11 shrink-0 rounded-xl bg-neutral-100 flex items-center justify-center overflow-hidden text-neutral-500">
-                              {file.type === 'photo' && file.dataUrl ? <img src={file.dataUrl} alt="" className="w-full h-full object-cover" />
+                              {file.type === 'photo' ? file.dataUrl ? <img src={file.dataUrl} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-5 h-5" />
                                 : file.type === 'audio' ? <FileAudio className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-bold text-neutral-900 break-all">{file.name}</p>
-                              <p className="mt-1 text-[11px] text-neutral-400">{file.type === 'photo' ? '사진' : file.type === 'audio' ? '녹음' : 'AI 문서'} · {new Date(deletedAt).toLocaleDateString('ko-KR')} 삭제</p>
-                              <p className="mt-1 text-[11px] text-rose-500">{new Date(trashExpiresAt(entry)).toLocaleDateString('ko-KR')} 자동 삭제</p>
+                              <p className="mt-1 text-[11px] text-neutral-400">{file.type === 'photo' ? '사진' : file.type === 'audio' ? '녹음' : '문서'} · {new Date(deletedAt).toLocaleDateString('ko-KR')} {entry.cloud ? '상태 확인' : '삭제'}</p>
+                              <p className={`mt-1 text-[11px] ${entry.cloud?.unavailable || lifecycle.state?.operations.some(op => op.fileId === file.id && op.error) ? 'text-amber-700' : 'text-neutral-500'}`}>{entry.cloud
+                                ? lifecycle.state?.operations.some(op => op.fileId === file.id && op.error) ? '다시 시도 필요'
+                                  : entry.cloud.pending === 'purge' ? '완전 삭제 중'
+                                  : entry.cloud.pending === 'trash' ? '삭제 중'
+                                  : entry.cloud.pending === 'restore' ? '복원 중'
+                                  : entry.cloud.unavailable ? '원본 확인 필요'
+                                  : 'Drive 휴지통에 보관됨'
+                                : lifecycle.enabled ? '기기 전용 휴지통 · Drive 원본은 변경하지 않음'
+                                  : `${new Date(trashExpiresAt(entry)).toLocaleDateString('ko-KR')} 자동 삭제`}</p>
+                              {lifecycle.state?.operations.some(op => op.fileId === file.id && op.error) && <div className="mt-2 space-y-1 text-xs leading-snug text-neutral-500">
+                                <p className="break-words">{lifecycle.state.operations.find(op => op.fileId === file.id && op.error)?.error}</p>
+                                <p>앱 센터의 Google Drive에서 다시 시도해 주세요.</p>
+                              </div>}
                             </div>
                             <div className="col-start-2 flex items-center gap-1.5 sm:col-start-3 sm:row-start-1">
-                            <button disabled={trashBusy} onClick={() => restoreFiles([file.id])} aria-label={`${file.name} 복원`}
+                            <button disabled={trashBusy || !!entry.cloud?.pending || entry.cloud?.unavailable} onClick={() => restoreFiles([file.id])} aria-label={`${file.name} 복원`}
                               className="shrink-0 rounded-xl bg-neutral-100 px-3 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-200 disabled:opacity-40">복원</button>
-                            <button disabled={trashBusy} onClick={() => deleteTrashFile(file)} aria-label={`${file.name} 영구 삭제`}
-                              className="shrink-0 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-100 disabled:opacity-40">삭제</button>
+                            <button disabled={trashBusy || !!entry.cloud?.pending || entry.cloud?.unavailable} onClick={() => deleteTrashFile(file)} aria-label={`${file.name} 완전 삭제`}
+                              className="shrink-0 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-100 disabled:opacity-40">완전 삭제</button>
                             </div>
                           </div>
                           );
@@ -3342,6 +3368,29 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                 {/* Sub-view: 시간표 등록 */}
                 {activeSettingDetail === 'timetable' && (
                   <div className="space-y-3">
+                    <div role="status" className="rounded-2xl bg-neutral-100 px-4 py-3 text-sm text-neutral-600">
+                      <p>{timetableSync.message}</p>
+                      {timetableSync.conflict && <>
+                        {timetableSync.comparison && <div className="mt-2 space-y-1 text-xs">
+                          <p>이 기기: {timetableSync.comparison.local.join(' / ') || '시간표 없음'}</p>
+                          <p>계정: {timetableSync.comparison.server.join(' / ') || '시간표 없음'}</p>
+                        </div>}
+                        <p className="mt-1 text-xs">선택하지 않은 시간표는 이 기기에 복구용으로 보관됩니다. 브라우저 데이터 삭제 시 함께 지워질 수 있습니다.</p>
+                        <div className="flex flex-wrap gap-2">
+                          {timetableSync.comparison && <button type="button" onClick={timetableSync.downloadVersions}
+                            className="mt-2 rounded-full bg-white px-4 py-2 text-neutral-700">두 시간표 백업 다운로드</button>}
+                          <button type="button" onClick={() => {
+                            if (window.confirm('계정 시간표를 사용합니다. 이 기기의 시간표는 복구용으로 이 기기에 보관됩니다. 계속할까요?')) timetableSync.useServer();
+                          }} className="mt-2 rounded-full bg-white px-4 py-2 text-neutral-700">계정 시간표 사용</button>
+                          <button type="button" onClick={() => {
+                            if (window.confirm('이 기기의 시간표로 계정 시간표를 변경합니다. 기존 계정 시간표는 복구용으로 이 기기에 보관됩니다. 계속할까요?')) timetableSync.useLocal();
+                          }} className="mt-2 rounded-full bg-white px-4 py-2 text-neutral-700">이 기기 시간표 사용</button>
+                        </div>
+                      </>}
+                      {!timetableSync.editable && !timetableSync.conflict && <button type="button" onClick={timetableSync.retry}
+                        className="mt-2 rounded-full bg-white px-4 py-2 text-neutral-700 hover:bg-neutral-200 active:bg-neutral-300 transition-colors">다시 확인</button>}
+                    </div>
+                    <fieldset disabled={!timetableSync.editable} className="min-w-0 space-y-3 disabled:opacity-60">
                     <input
                       type="file"
                       ref={timetableInputRef}
@@ -3360,48 +3409,20 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         </div>
                       </div>
 
-                      <StorageModeGuide mode={storageMode} />
-
-                      {/* Storage Mode Toggle Buttons inside Settings */}
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          data-tour="default"
-                          onClick={() => {
-                            setStorageMode('default');
-                            setNavPath([]);
-                            showToast('디폴트 모드로 전환되었습니다.');
-                          }}
-                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                            storageMode === 'default'
-                              ? 'bg-black text-white border border-black shadow-xs'
-                              : 'bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50'
-                          }`}
-                        >
-                          디폴트 모드 적용
-                        </button>
-                        <button
-                          data-tour="schedule"
-                          onClick={() => {
-                            setStorageMode('timetable');
-                            setNavPath([]);
-                            showToast('시간표 모드 (연도 → 학기 → 과목 → 달 → 일)로 전환되었습니다.');
-                          }}
-                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                            storageMode === 'timetable'
-                              ? 'bg-black text-white border border-black shadow-xs'
-                              : 'bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50'
-                          }`}
-                        >
-                          시간표 모드 적용
-                        </button>
-                      </div>
+                      <StorageModeGuide mode={storageMode} onChange={mode => {
+                        setStorageMode(mode);
+                        setNavPath([]);
+                        showToast(mode === 'default'
+                          ? '디폴트 모드로 전환되었습니다.'
+                          : '시간표 모드 (연도 → 학기 → 과목 → 달 → 일)로 전환되었습니다.');
+                      }} />
 
                       {/* Pending Timetable Metadata Form */}
                       {pendingTimetableData ? (
                         <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-4">
                           <h4 className="text-sm font-bold text-neutral-900">시간표 세부 정보 입력</h4>
-                          <div className="relative rounded-xl overflow-hidden border border-neutral-200/80 bg-neutral-900 aspect-4/3 max-h-40">
-                            <img src={pendingTimetableData.image} alt="인식된 시간표" className="w-full h-full object-contain" />
+                          <div>
+                            <img src={pendingTimetableData.image} alt="인식된 시간표" className="block h-auto w-auto max-h-80 max-w-full rounded-xl border border-neutral-200/80" />
                           </div>
                           <div className="space-y-3">
                             <div>
@@ -3469,10 +3490,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               </button>
                               <button 
                                 onClick={handleSavePendingTimetable}
-                                className="flex-1 py-2.5 rounded-xl text-white text-xs font-bold"
-                                style={{ backgroundColor: accentColor }}
+                                className="flex-1 py-2.5 rounded-xl bg-neutral-100 text-neutral-600 text-xs font-bold hover:bg-neutral-200"
                               >
-                                {pendingTimetableData.entries.length}개 과목 저장
+                                {countTimetableSubjects(pendingTimetableData.entries)}개 과목 저장
                               </button>
                             </div>
                           </div>
@@ -3491,7 +3511,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                               {timetables.map((tt) => {
                                 const isExpanded = expandedTimetableIds.includes(tt.id);
                                 const isEditing = editingTimetableId === tt.id;
-                                const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
 
                                 return (
                                   <div key={tt.id} className="bg-neutral-50 rounded-xl p-3.5 border border-neutral-200/80 space-y-2 relative overflow-hidden group hover:border-neutral-300 transition-colors">
@@ -3610,7 +3629,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                     {/* Action row with Subject Count & Toggle Button */}
                                     <div className="flex items-center justify-between pt-2 border-t border-neutral-200/50">
                                       <span className="text-[11px] font-semibold text-neutral-600">
-                                        인식된 과목: <span className="text-neutral-900 font-bold">{tt.entries.length}개</span>
+                                        인식된 과목: <span className="text-neutral-900 font-bold">{countTimetableSubjects(tt.entries)}개</span>
                                       </span>
                                       <button
                                         type="button"
@@ -3638,24 +3657,15 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                                 📋 과목 및 강의 시간
                                               </span>
                                               <span className="text-[10px] text-neutral-400 font-medium">
-                                                총 {tt.entries.length}개 강좌
+                                                총 {countTimetableSubjects(tt.entries)}개 과목 · 수업 {tt.entries.length}개
                                               </span>
                                             </div>
-                                            <div className="max-h-48 overflow-y-auto space-y-1 bg-white rounded-xl p-2.5 border border-neutral-200/80 divide-y divide-neutral-100">
-                                              {tt.entries.map((entry, idx) => (
-                                                <div key={idx} className="flex items-center justify-between text-xs py-1.5 first:pt-0.5 last:pb-0.5">
-                                                  <div className="flex items-center gap-2 font-semibold text-neutral-800 min-w-0 pr-2">
-                                                    <span className="w-5 h-5 rounded-md bg-neutral-100 text-neutral-700 flex items-center justify-center text-[10px] font-bold shrink-0">
-                                                      {dayNames[entry.dayOfWeek] || '월'}
-                                                    </span>
-                                                    <span className="truncate">{entry.subject}</span>
-                                                  </div>
-                                                  <span className="text-[11px] text-neutral-500 font-mono shrink-0">
-                                                    {entry.startTime} ~ {entry.endTime}
-                                                  </span>
-                                                </div>
-                                              ))}
-                                            </div>
+                                            <TimetableClassTimes entries={tt.entries} onSave={(index, start, end) => {
+                                              setTimetables(previous => previous.map(item => item.id === tt.id
+                                                ? { ...item, entries: updateTimetableTime(item.entries, index, start, end) }
+                                                : item));
+                                              showToast('강의 시간이 수정되었습니다.');
+                                            }} />
                                           </div>
                                         ) : (
                                           <div className="bg-white rounded-xl p-3 border border-neutral-200/80 text-center text-xs text-neutral-400 font-medium">
@@ -3671,11 +3681,11 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                                                 <span>🖼️ 원본 시간표 이미지 확인</span>
                                                 <span className="text-[10px] text-neutral-400 group-open/img:rotate-180 transition-transform">▼</span>
                                               </summary>
-                                              <div className="mt-2 rounded-xl overflow-hidden border border-neutral-200 bg-neutral-950 aspect-4/3 max-h-52">
+                                              <div className="mt-2">
                                                 <img
                                                   src={tt.image}
                                                   alt={`${tt.year}년 ${tt.semester} 원본 시간표`}
-                                                  className="w-full h-full object-contain"
+                                                  className="block h-auto w-auto max-h-96 max-w-full rounded-xl border border-neutral-200/80"
                                                 />
                                               </div>
                                             </details>
@@ -3718,257 +3728,41 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         </div>
                       </div>
                     )}
+                    </fieldset>
                   </div>
                 )}
 
-                {/* Sub-view: AI 센터 */}
-                {activeSettingDetail === 'ai_center' && (() => {
-                  const aiDocs = mediaList.filter((m) => m.type === 'document' || m.name.endsWith('.md'));
-                  return (
-                    <div className="space-y-3">
-                      {/* AI Center Toolbar */}
-                      <div className="bg-white p-3 rounded-2xl border border-neutral-200/80 shadow-2xs flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5">
-                          <button
-                            type="button"
-                            title="검색"
-                            onClick={() => showToast('검색 기능 준비 중입니다.')}
-                            className="w-11 h-11 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-90 text-neutral-700 transition-all flex items-center justify-center shadow-2xs"
-                          >
-                            <Search className="w-5.5 h-5.5 stroke-[2] text-neutral-700" />
-                          </button>
-
-                          <button
-                            type="button"
-                            title="필터"
-                            onClick={() => showToast('필터 기능 준비 중입니다.')}
-                            className="w-11 h-11 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-90 text-neutral-700 transition-all flex items-center justify-center shadow-2xs"
-                          >
-                            <Filter className="w-5.5 h-5.5 stroke-[2] text-neutral-700" />
-                          </button>
-
-                          <button
-                            type="button"
-                            data-tour="sessions"
-                            title="프로세스 현황 보기"
-                            onClick={() => setActiveSettingDetail('ai_process')}
-                            className="relative w-11 h-11 rounded-full bg-neutral-100 hover:bg-neutral-200/80 active:scale-90 text-neutral-700 transition-all flex items-center justify-center shadow-2xs"
-                          >
-                            <Cpu className="w-5.5 h-5.5 stroke-[2] text-neutral-700" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Selection Mode Notice Banner in AI Center */}
-                      {(isSelectionMode || isReorderMode) && (
-                        <div className="bg-neutral-900 text-white border border-neutral-800 shadow-md rounded-2xl px-4 py-2.5 flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-neutral-300 animate-pulse flex-shrink-0" />
-                            <span className="font-bold text-xs text-white">{selectedAiDocs.length}개 문서 선택됨</span>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setIsSelectionMode(false);
-      setIsReorderMode(false);
-                              setSelectedItemIds([]);
-                              showToast('선택 모드가 종료되었습니다.');
-                            }}
-                            className="text-xs font-bold text-neutral-300 hover:text-white px-2.5 py-1 rounded-lg transition-colors bg-white/10 hover:bg-white/20"
-                          >
-                            취소
-                          </button>
-                        </div>
-                      )}
-
-                      {/* AI Summary Markdown Files List */}
-                      <div className="space-y-2.5">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
-                          {aiDocs.length === 0 ? (
-                            <div className="p-8 bg-white rounded-2xl border border-neutral-200/80 text-center text-xs text-neutral-500">
-                              저장된 AI 마크다운 문서가 없습니다.
-                            </div>
-                          ) : (
-                            aiDocs.map((doc) => {
-                              const isSelected = selectedItemIds.includes(doc.id);
-                              return (
-                                <HoldableFileCard
-                                  tourId="document"
-                                  key={doc.id}
-                                  isSelectionMode={isSelectionMode}
-                                  onSelect={() => handleFileHoldSelect(doc.id)}
-                                  onClickNormal={() => {
-                                    setPreviewDoc(doc);
-                                  }}
-                                  className={`p-3.5 sm:p-4 rounded-2xl border transition-all flex items-center justify-between cursor-pointer active:scale-[0.99] group ${
-                                    isSelected
-                                      ? 'border-neutral-900 bg-neutral-100/90 shadow-xs'
-                                      : 'bg-white border-neutral-200/80 shadow-2xs hover:border-neutral-400 hover:shadow-sm'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-neutral-900 to-neutral-800 text-amber-300 flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
-                                      <Sparkles className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center gap-1.5">
-                                        <h4 className="text-xs sm:text-sm font-bold text-neutral-900 leading-snug truncate">
-                                          {doc.name}
-                                        </h4>
-                                        <span className="px-1.5 py-0.2 rounded-md bg-neutral-100 border border-neutral-200 text-[10px] font-bold text-neutral-600 shrink-0">
-                                          MD
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-2 text-[11px] text-neutral-400 mt-1">
-                                        <span>
-                                          {doc.timestamp instanceof Date
-                                            ? doc.timestamp.toLocaleString('ko-KR', {
-                                                month: '2-digit',
-                                                day: '2-digit',
-                                                hour: '2-digit',
-                                                minute: '2-digit',
-                                              })
-                                            : String(doc.timestamp || '방금 전')}
-                                        </span>
-                                        {doc.fileSize && (
-                                          <>
-                                            <span>•</span>
-                                            <span>{doc.fileSize}</span>
-                                          </>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </HoldableFileCard>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Sub-view: AI 프로세스 현황 */}
-                {activeSettingDetail === 'ai_process' && (
-                  <div className="space-y-4">
-                    {/* Section 1: 진행 중인 AI 정리 세션 */}
-                    <div className="space-y-2.5">
-                      <div className="flex items-center justify-between px-1">
-                        <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
-                          진행 중인 AI 정리 ({aiSessions.filter((s) => s.status !== 'completed').length})
-                        </span>
-                      </div>
-
-                      {aiSessions.filter((s) => s.status !== 'completed').length === 0 ? (
-                        <div className="p-6 bg-white rounded-2xl border border-neutral-200/80 text-center space-y-2">
-                          <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                          <p className="text-xs font-bold text-neutral-700">현재 진행 중인 AI 정리 작업이 없습니다.</p>
-                          <p className="text-[11px] text-neutral-400">
-                            사진이나 음성 자료를 선택하고 AI 요약을 실행하면 이곳에서 실시간 경과를 확인할 수 있습니다.
-                          </p>
-                        </div>
-                      ) : (
-                        aiSessions
-                          .filter((s) => s.status !== 'completed')
-                          .map((session) => (
-                            <div
-                              key={session.id}
-                              className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs space-y-3 relative overflow-hidden"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex items-center gap-2 min-w-0 flex-1 basis-full sm:basis-auto">
-                                  <span className="w-2 h-2 rounded-full bg-neutral-900 shrink-0" />
-                                  <h4 className="text-sm font-bold text-neutral-900 leading-snug truncate">
-                                    {session.title}
-                                  </h4>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-xs font-extrabold text-neutral-800 bg-neutral-100 px-2.5 py-1 rounded-full border border-neutral-200 shrink-0">
-                                    {session.status === 'error' ? '중단됨' : `${session.progress}%`}
-                                  </span>
-                                  {session.files.some(file => file.summary !== undefined) && (
-                                    <button type="button" className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-bold"
-                                      onClick={() => setPreviewDoc({ id: `partial_${session.id}`, type: 'document', name: `${session.title}_완료분.md`, timestamp: new Date(),
-                                        fileSize: `${(new Blob([jobMarkdown(session)]).size / 1024).toFixed(1)} KB`,
-                                        sourceFileNames: session.files.filter(file => file.summary !== undefined).map(file => file.name),
-                                        content: jobMarkdown(session),
-                                      } as MediaFile)}>
-                                      완료분 보기
-                                    </button>
-                                  )}
-                                  {session.status === 'error' && (
-                                    <button type="button" onClick={() => void aiSessionRunners.current.get(session.id)?.()}
-                                      className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-bold text-white">
-                                      이어서 시도
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => {
-                                      aiSessionRunners.current.delete(session.id);
-                                      aiControllers.current.get(session.id)?.abort();
-                                      void removeJob(uid, session.id).catch(() => showToast('작업 삭제에 실패했습니다. 다시 시도해주세요.'));
-                                      setAiSessions((prev) => prev.filter((s) => s.id !== session.id));
-                                      showToast(`'${session.title}' AI 정리 세션이 취소되었습니다.`);
-                                    }}
-                                    className="text-xs font-bold text-neutral-600 hover:text-rose-600 bg-neutral-100 hover:bg-rose-50 px-2.5 py-1 rounded-full border border-neutral-200/80 transition-colors active:scale-95 cursor-pointer flex items-center gap-1"
-                                    title="AI 정리 취소"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                    <span>{session.status === 'error' ? '닫기' : '취소'}</span>
-                                  </button>
-                                </div>
-                              </div>
-
-                              <p
-                                role={session.status === 'error' ? 'alert' : 'status'}
-                                className={`text-xs break-words ${session.status === 'error' ? 'text-rose-600 font-semibold' : 'text-neutral-500'}`}
-                              >
-                                {session.currentStep}
-                              </p>
-                              {session.status === 'processing' && (
-                                <p className="text-[11px] text-neutral-400">진행률은 완료된 파일 기준입니다. 첫 파일을 분석하는 동안에는 0%로 표시됩니다.</p>
-                              )}
-
-                              {/* Progress bar */}
-                              <div className="w-full h-2.5 bg-neutral-100 rounded-full overflow-hidden">
-                                <motion.div
-                                  className="h-full bg-neutral-900"
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${session.progress}%` }}
-                                  transition={{ duration: 0.5 }}
-                                />
-                              </div>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 {/* Sub-view: 환경설정 */}
                 {activeSettingDetail === 'settings' && (
                   <div className="space-y-3">
-                    <div className="bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs space-y-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-800 flex items-center justify-center">
-                          <SlidersHorizontal className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-neutral-900">환경설정</h4>
-                          <p className="text-[11px] text-neutral-400">시스템 옵션 및 환경설정</p>
-                        </div>
-                      </div>
-
-                      <div className="py-6 text-center border-t border-neutral-100">
-                        <p className="text-xs text-neutral-500 font-medium">추가 설정 가능한 옵션이 준비 중입니다.</p>
-                      </div>
-                    </div>
+                    {isFeedbackAdmin && <div className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-2xs">
+                      <button type="button" onClick={() => setActiveSettingDetail('developer')} className="flex min-h-16 w-full items-center justify-between gap-3 p-4 text-left hover:bg-neutral-50 active:bg-neutral-100">
+                        <div className="flex items-center gap-3"><span className="rounded-xl bg-neutral-100 p-3"><Cpu className="h-5 w-5" /></span><div><p className="text-sm font-semibold">개발자 페이지</p><p className="mt-1 text-xs text-neutral-400">피드백 관리 및 안내 메시지 확인</p></div></div><ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+                      </button>
+                    </div>}
                   </div>
                 )}
+
+                {isFeedbackAdmin && activeSettingDetail === 'developer' && (
+                  <div className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-2xs divide-y divide-neutral-100">
+                    <a href="#admin" target="_blank" rel="noopener noreferrer" className="flex min-h-16 w-full items-center justify-between gap-3 p-4 text-left hover:bg-neutral-50 active:bg-neutral-100">
+                      <div className="flex items-center gap-3"><span className="rounded-xl bg-neutral-100 p-3"><Shield className="h-5 w-5" /></span><div><p className="text-sm font-semibold">피드백 관리</p><p className="mt-1 text-xs text-neutral-400">관리자 전용 · 새 창에서 열기</p></div></div><ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+                    </a>
+                    <button type="button" onClick={() => setActiveSettingDetail('sync_preview')} className="flex min-h-16 w-full items-center justify-between gap-3 p-4 text-left hover:bg-neutral-50 active:bg-neutral-100">
+                      <div className="flex items-center gap-3"><span className="rounded-xl bg-neutral-100 p-3"><Info className="h-5 w-5" /></span><div><p className="text-sm font-semibold">안내 메시지 미리보기</p><p className="mt-1 text-xs text-neutral-400">상태별 안내 화면 확인</p></div></div><ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+                    </button>
+                  </div>
+                )}
+                {(activeSettingDetail === 'terms' || activeSettingDetail === 'privacy') && <PolicyPanel kind={activeSettingDetail} />}
 
                 {/* Sub-view: 앱 설명 */}
                 {activeSettingDetail === 'about' && (
                   <div className="space-y-3">
+                    <div className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white divide-y divide-neutral-100 shadow-2xs">
+                      <button type="button" onClick={() => setActiveSettingDetail('terms')} className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"><div><h4 className="text-sm font-bold text-neutral-900">이용약관</h4><p className="text-[11px] text-neutral-400 mt-0.5">서비스 이용 규칙</p></div><ChevronRight className="w-4 h-4 text-neutral-400" /></button>
+                      <button type="button" onClick={() => setActiveSettingDetail('privacy')} className="w-full p-4 flex items-center justify-between hover:bg-neutral-50 active:bg-neutral-100 transition-colors text-left"><div><h4 className="text-sm font-bold text-neutral-900">개인정보 처리방침</h4><p className="text-[11px] text-neutral-400 mt-0.5">데이터 처리와 삭제 안내</p></div><ChevronRight className="w-4 h-4 text-neutral-400" /></button>
+                    </div>
                     {onReplayTutorial && (
                       <div className="space-y-2">
                       <button
@@ -3992,7 +3786,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                           {([
                             { section: 'camera', title: '카메라·녹음', description: '촬영과 녹음 화면을 살펴봐요.' },
                             { section: 'explorer', title: '파일 탐색기', description: '파일 찾기, 선택과 활용 방법을 알아봐요.' },
-                            { section: 'apps', title: '앱 센터', description: '시간표 등록과 AI 센터를 살펴봐요.' },
+                            { section: 'apps', title: '앱 센터', description: '시간표 등록과 앱 설정를 살펴봐요.' },
                           ] satisfies { section: TutorialSection; title: string; description: string }[]).filter(item => canCapture || item.section !== 'camera').map(item => (
                             <button
                               key={item.section}
@@ -4023,37 +3817,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         {/* Photo View Modal */}
         <AnimatePresence>
           {previewPhoto && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.2 }}
-              className="absolute inset-0 z-50 bg-black/95 backdrop-blur-md p-4 flex flex-col items-center justify-between"
-            >
-              <div className="w-full flex items-center justify-between text-white py-3 px-4">
-                <span className="text-xs font-bold truncate max-w-[220px]">{previewPhoto.name}</span>
-                <button
-                  onClick={() => setPreviewPhoto(null)}
-                  className="w-8 h-8 rounded-full bg-neutral-800/80 hover:bg-neutral-700 flex items-center justify-center text-white transition-all active:scale-90"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {previewPhoto.dataUrl && (
-                <div className="flex-1 w-full flex items-center justify-center py-4 overflow-hidden">
-                  <img
-                    src={previewPhoto.dataUrl}
-                    alt={previewPhoto.name}
-                    className="max-h-full max-w-full object-contain rounded-2xl border border-white/20 shadow-2xl"
-                  />
-                </div>
-              )}
-
-              <div className="w-full text-center pb-6 text-[11px] text-neutral-400">
-                <p>촬영 일시: {new Date(previewPhoto.timestamp).toLocaleString('ko-KR')}</p>
-              </div>
-            </motion.div>
+            <ExplorerPhotoPreview key={previewPhoto.id} file={previewPhoto}
+              onClose={() => setPreviewPhoto(null)} onDelete={() => trashFiles([previewPhoto])} />
           )}
         </AnimatePresence>
 
@@ -4206,6 +3971,16 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
         </AnimatePresence>
 
         {/* Multi-Selection Mode Bottom Floating Action Toolbar */}
+        {downloadNotice && <div role="status" className="absolute left-4 right-4 top-20 z-[110] rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-900 shadow-lg">
+          <p>{downloadNotice}</p>
+          {!!preparedDownloads.length && <button className="mr-4 mt-2 underline" onClick={() => {
+            if (preparedDownloads.some(f => trashEntries.some(e => e.file.id === f.id && (!e.restored || e.cloud?.unavailable)))) {
+              setPreparedDownloads([]); setDownloadNotice('파일 상태가 변경되었습니다. 다시 선택해 주세요.'); return;
+            }
+            void downloadFiles(preparedDownloads).then(finishDownload).catch(e => setDownloadNotice(e.message));
+          }}>준비된 파일 다운로드</button>}
+          <button type="button" className="mt-2 underline" onClick={() => { setDownloadNotice(''); setPreparedDownloads([]); }}>닫기</button>
+        </div>}
         <AnimatePresence>
           {(isSelectionMode || isReorderMode) && tutorialStep?.target !== 'file' && (
             <motion.div
@@ -4217,16 +3992,30 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
               style={{ bottom: 'max(24px, env(safe-area-inset-bottom, 24px))' }}
             >
               <div className="bg-white/95 backdrop-blur-xl border border-neutral-200/90 text-neutral-800 shadow-2xl rounded-full h-[84px] px-7 flex items-center justify-center gap-6">
+                {RECORDING_ENABLED && onlyRecordings && <button type="button" disabled={transcribing} onClick={() => void transcribeSelected()} title="텍스트 변환" aria-label="선택한 녹음 텍스트 변환" className="flex h-14 shrink-0 items-center gap-2 rounded-full border-2 border-neutral-200 px-4 text-sm disabled:opacity-50">{transcribing ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileText className="h-5 w-5" />}텍스트 변환</button>}
                 {/* 1. 다운로드 버튼 */}
                 <button
                   onClick={() => {
-                    const count = activeSettingDetail === 'ai_center' ? selectedAiDocs.length : selectedExplorerFiles.length;
-                    if (count === 0) {
-                      showToast('선택된 항목이 없습니다.');
-                    } else {
-                      showToast(`${count}개 항목 다운로드 시작`);
+                    if (tutorialStep) { setDownloadNotice('안내 화면에서는 다운로드하지 않습니다.'); return; }
+                    if (downloadBusy) return;
+                    setDownloadBusy(true); setDownloadNotice('선택한 파일을 내보내는 중입니다…');
+                    try {
+                    const files = mediaList.filter(file => selectedFileIds.includes(file.id));
+                    if (!pcOnly && files.some(file => !file.dataUrl && lifecycle.files.some(f => f.id === file.id))) {
+                      void Promise.all(files.map(prepareCloudFile)).then(prepared => {
+                        setPreparedDownloads(prepared.map(file => ({ ...file,
+                          text: file.type === 'document' && !file.dataUrl ? localStorage.getItem(documentKey(uid, file.id)) ?? undefined : undefined })));
+                        setDownloadNotice('원본 준비 완료. 아래 버튼을 눌러 저장해 주세요.');
+                      }).catch(error => setDownloadNotice(error.message)).finally(() => setDownloadBusy(false));
+                      return;
                     }
+                    const sources = files.map(file => ({ ...file,
+                      text: file.type === 'document' && !file.dataUrl ? localStorage.getItem(documentKey(uid, file.id)) ?? undefined : undefined }));
+                    void downloadFiles(sources).then(finishDownload).catch(error => setDownloadNotice(error.message))
+                      .finally(() => setDownloadBusy(false));
+                    } catch { setDownloadBusy(false); setDownloadNotice('기기 원본을 읽지 못했습니다. 저장 공간과 파일 상태를 확인해 주세요.'); }
                   }}
+                  disabled={downloadBusy}
                   className="w-14 h-14 rounded-full bg-white border-2 border-neutral-200 ring-2 ring-neutral-200/60 text-neutral-900 hover:text-black hover:bg-neutral-50 active:scale-90 transition-all flex items-center justify-center shadow-md"
                   data-tour="download"
                   title="다운로드"
@@ -4234,26 +4023,9 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   <Download className="w-6 h-6 stroke-[2.2]" />
                 </button>
 
-                {/* 2. AI 버튼 (AI 센터가 아닐 때만 노출) */}
-                {activeSettingDetail !== 'ai_center' && (
-                  <button
-                    onClick={() => {
-                      if (selectedExplorerFiles.length === 0) {
-                        showToast('선택된 항목이 없습니다.');
-                      } else {
-                        startAiSummaryProcess();
-                      }
-                    }}
-                    className="w-14 h-14 rounded-full bg-neutral-900 border-2 border-neutral-800 ring-2 ring-neutral-700/60 text-white hover:bg-black active:scale-90 transition-all flex items-center justify-center shadow-md"
-                    data-tour="ai"
-                    title="AI 스마트 요약"
-                  >
-                    <Sparkles className="w-6 h-6 stroke-[2]" style={{ color: accentColor }} />
-                  </button>
-                )}
 
                 {/* 2.2 순서 바꾸기 / 완료 버튼 (하위 폴더가 없는 최하위 개별 파일 폴더에서만 활성화) */}
-                {activeSettingDetail !== 'ai_center' && !hasSelectedAiDocs && (
+                {!hasSelectedAiDocs && (
                   <button
                     data-tour="reorder"
                     disabled={!isReorderMode && !isTerminalFolder}
@@ -4353,8 +4125,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   </button>
                 )}
 
-                {/* 2.5 이름 바꾸기 버튼 (AI 센터이거나 AI 문서가 선택되었을 때) */}
-                {(activeSettingDetail === 'ai_center' || hasSelectedAiDocs) && (
+                {/* 2.5 이름 바꾸기 버튼 (AI 센터이거나 문서가 선택되었을 때) */}
+                {hasSelectedAiDocs && (
                   <button
                     disabled={selectedAiDocs.length > 1}
                     onClick={() => {
@@ -4363,7 +4135,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         return;
                       }
                       if (selectedAiDocs.length === 0) {
-                        showToast('선택된 AI 문서가 없습니다.');
+                        showToast('선택된 문서가 없습니다.');
                       } else {
                         setRenameModalItem(selectedAiDocs[0]);
                         setNewDocName(selectedAiDocs[0].name);
@@ -4380,8 +4152,8 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   </button>
                 )}
 
-                {/* 2.6 정보 보기 버튼 (AI 센터이거나 AI 문서가 선택되었을 때) */}
-                {(activeSettingDetail === 'ai_center' || hasSelectedAiDocs) && (
+                {/* 2.6 정보 보기 버튼 (AI 센터이거나 문서가 선택되었을 때) */}
+                {hasSelectedAiDocs && (
                   <button
                     disabled={selectedAiDocs.length > 1}
                     onClick={() => {
@@ -4390,9 +4162,10 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                         return;
                       }
                       if (selectedAiDocs.length === 0) {
-                        showToast('선택된 AI 문서가 없습니다.');
+                        showToast('선택된 문서가 없습니다.');
                       } else {
                         setInfoModalItem(selectedAiDocs[0]);
+                        finishSelection();
                       }
                     }}
                     className={`w-14 h-14 rounded-full transition-all flex items-center justify-center ${
@@ -4411,8 +4184,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   disabled={trashBusy}
                   onClick={async () => {
                     if (tutorialStep) return;
-                    const isAiCenter = activeSettingDetail === 'ai_center';
-                    const targetItems = isAiCenter ? selectedAiDocs : selectedExplorerFiles;
+                    const targetItems = selectedExplorerFiles;
                     if (targetItems.length === 0) {
                       showToast('선택된 항목이 없습니다.');
                     } else {
@@ -4429,43 +4201,6 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
           )}
         </AnimatePresence>
 
-        {/* AI Starting Bubble (Appears for ~2 seconds then disappears automatically) */}
-        <AnimatePresence>
-          {isAiStartingBubbleOpen && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-xs pointer-events-none">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: -10 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-                className="pointer-events-auto bg-[#F2F2F7] text-neutral-900 border border-black/[0.06] shadow-2xl rounded-[28px] px-6 py-7 max-w-xs w-full relative overflow-hidden flex flex-col items-center text-center space-y-4"
-              >
-                <div className="w-16 h-16 rounded-[22px] bg-[#18181A] shadow-lg shadow-black/10 flex items-center justify-center mx-auto">
-                  <Brain className="w-8 h-8 text-[#FFE195] stroke-[1.8]" />
-                </div>
-
-                <div className="space-y-1.5 pt-1">
-                  <h4 className="font-bold text-[#1C1C1E] text-[15px] tracking-tight">
-                    AI 정리를 시작합니다...
-                  </h4>
-                  <p className="text-xs text-[#8E8E93] font-medium">
-                    AI 정리가 완료되면 알려드릴게요!
-                  </p>
-                </div>
-
-                {/* Animated 2-second progress bar */}
-                <div className="w-full bg-[#E5E5EA] h-[5px] rounded-full overflow-hidden mt-2">
-                  <motion.div
-                    className="bg-[#18181A] h-full rounded-full"
-                    initial={{ width: '0%' }}
-                    animate={{ width: '100%' }}
-                    transition={{ duration: 2.0, ease: 'linear' }}
-                  />
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
         {/* AI Document Rename Modal */}
         <AnimatePresence>
           {renameModalItem && (
@@ -4568,7 +4303,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-100">
                       <span className="text-[11px] font-semibold text-neutral-400 block mb-0.5">종류</span>
-                      <span className="font-bold text-neutral-800">AI 마크다운 (.md)</span>
+                      <span className="font-bold text-neutral-800">마크다운 (.md)</span>
                     </div>
                     <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-100">
                       <span className="text-[11px] font-semibold text-neutral-400 block mb-0.5">파일 크기</span>
@@ -4594,7 +4329,7 @@ export const FolderExplorerModal: React.FC<FolderExplorerModalProps> = ({
 
                   <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-100 space-y-0.5">
                     <span className="text-[11px] font-semibold text-neutral-400 block">저장 위치</span>
-                    <span className="font-bold text-neutral-900">AI 센터 Vault / 스마트 요약함</span>
+                    <span className="font-bold text-neutral-900">내 자료</span>
                   </div>
 
                   {/* AI Source Files List */}

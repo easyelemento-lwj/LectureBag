@@ -30,6 +30,7 @@ export function trialClient(catalog: CloudCatalog, connectionId: string, signal:
   let expires = 0;
   const credentials = async () => {
     signal.throwIfAborted();
+    if (typeof catalog.assertRequestReady === 'function') catalog.assertRequestReady();
     if (!grant || Date.now() >= expires) {
       const fresh = await catalog.transferToken(connectionId, signal);
       grant = fresh; expires = Date.now() + Math.max(0, fresh.expiresIn - 60) * 1000;
@@ -37,7 +38,8 @@ export function trialClient(catalog: CloudCatalog, connectionId: string, signal:
     signal.throwIfAborted();
     return grant;
   };
-  return { client: new DriveClient(async () => (await credentials()).accessToken), credentials };
+  return { client: new DriveClient(async () => (await credentials()).accessToken, undefined,
+    ms => typeof catalog.deferRequests === 'function' ? catalog.deferRequests(ms) : Promise.resolve()), credentials };
 }
 
 export async function uploadPhoto(key: string, catalog: CloudCatalog, connectionId: string,
