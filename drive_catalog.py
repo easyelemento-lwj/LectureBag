@@ -203,6 +203,25 @@ class DriveCatalog:
             raise failure(404, 'DRIVE_FILE_NOT_REGISTERED')
         return value
 
+    def capture_audit(self, uid, connection_id, file_ids):
+        # Look across this user's historical connections, including deletion
+        # tombstones. An absent current inventory row is NOT permission to upload.
+        result = []
+        for file_id in file_ids:
+            value = self.file_reference(uid, file_id).get().to_dict()
+            if not value:
+                status = 'missing'
+            elif value.get('ownerUid') != uid:
+                raise failure(409, 'DRIVE_FILE_CONFLICT')
+            elif value.get('deletedAt') or value.get('purgedAt'):
+                status = 'deleted'
+            elif value.get('connectionId') != connection_id:
+                status = 'previous'
+            else:
+                status = 'registered'
+            result.append({'fileId': file_id, 'status': status})
+        return result
+
     def inventory(self, uid, connection_id, cursor=None, limit=50):
         # Scan by document ID, including trash. No Drive-folder traversal or new
         # composite index; old connection generations are skipped, not exposed.

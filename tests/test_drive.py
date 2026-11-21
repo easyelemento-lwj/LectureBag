@@ -713,3 +713,28 @@ def test_optional_notification_configuration_failure_degrades_without_failing_up
         async with notices.subscription('alice', 'c') as subscriber:
             assert subscriber is None
     asyncio.run(run())
+
+
+def test_capture_audit_requires_current_connection_origin_and_bounded_ids(monkeypatch):
+    async def run():
+        async with environment(monkeypatch) as (client, svc):
+            response, _ = await connect(client)
+            connection = response.json()['connectionId']
+            file_id = str(uuid.uuid4())
+            calls = []
+            def audit(uid, connection_id, ids):
+                calls.append((uid, connection_id, ids))
+                return [{'fileId': value, 'status': 'missing'} for value in ids]
+            svc.catalog.capture_audit = audit
+            body = {'connectionId': connection, 'fileIds': [file_id, file_id]}
+            response = await client.post('/api/cloud-files/capture-audit', json=body)
+            assert response.status_code == 200
+            assert response.json() == {'files': [{'fileId': file_id, 'status': 'missing'}]}
+            assert calls == [('alice', connection, [file_id])]
+            assert (await client.post('/api/cloud-files/capture-audit', json={**body, 'uid': 'bob'})).status_code == 422
+            assert (await client.post('/api/cloud-files/capture-audit', json={**body, 'fileIds': [file_id] * 51})).status_code == 422
+            assert (await client.post('/api/cloud-files/capture-audit', json={**body, 'fileIds': ['../bad']})).status_code == 422
+            assert (await client.post('/api/cloud-files/capture-audit', json=body, headers={'Origin': 'https://bad.example'})).status_code == 403
+            assert (await client.post('/api/cloud-files/capture-audit', json={**body, 'connectionId': str(uuid.uuid4())})).status_code == 409
+            assert len(calls) == 1
+    asyncio.run(run())
