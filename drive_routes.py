@@ -61,6 +61,10 @@ class PrepareTrashRequest(TransferRequest):
     operations: list[TrashRequest] = Field(min_length=1, max_length=50)
 
 
+class CaptureAuditRequest(TransferRequest):
+    fileIds: list[uuid.UUID] = Field(min_length=1, max_length=50)
+
+
 class ReconcileRequest(TransferRequest):
     cursor: str | None = Field(default=None, max_length=2048)
 
@@ -281,6 +285,18 @@ def create_drive_router(verify_user, firebase_app):
         if not current['connected'] or current.get('connectionId') != str(connection_id):
             raise failure(409, 'DRIVE_CONNECTION_CHANGED')
         return current
+
+    @router.post('/cloud-files/capture-audit')
+    async def capture_audit(body: CaptureAuditRequest, request: Request, context=Depends(deps)):
+        configured_origin(request)
+        uid, svc = context
+        current = await sync_connection(uid, svc, body.connectionId)
+        result = await asyncio.to_thread(svc.catalog.capture_audit, uid, str(body.connectionId),
+                                        list(dict.fromkeys(str(value) for value in body.fileIds)))
+        latest = await sync_connection(uid, svc, body.connectionId)
+        if latest['revision'] != current['revision']:
+            raise failure(409, 'DRIVE_CONNECTION_CHANGED')
+        return {'files': result}
 
     @router.get('/cloud-files/inventory')
     async def inventory(request: Request, connectionId: uuid.UUID,

@@ -64,3 +64,7 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* CameraX preview sits below the bundled WebView, only while camera UI is visible. */
+html.native-camera, html.native-camera body, html.native-camera #root,
+html.native-camera .app-shell, html.native-camera .camera-shell { background: transparent !important; }

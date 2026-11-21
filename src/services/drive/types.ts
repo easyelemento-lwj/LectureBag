@@ -23,6 +23,10 @@ export interface CloudMediaRecord extends DriveIdentity {
   capturedAt: string;
   updatedAt: string;
   revision: number;
+  /** Lifecycle revisions must not invalidate unchanged, verified original bytes. */
+  contentRevision?: number;
+  driveUnavailable?: boolean;
+  driveExplicitlyTrashed?: boolean;
   checksum?: string;
   checksumAlgorithm?: 'sha256' | 'md5';
   deletedAt?: string;

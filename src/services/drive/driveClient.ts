@@ -1,19 +1,23 @@
 /** Foreground Drive transport. Native background transfers use OS adapters,
  * not this fetch loop. All offsets must come from Drive's acknowledged Range.
  */
+import { retryAfterMs } from './requestBudget';
+
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 const CHUNK_UNIT = 256 * 1024;
 
 export class DriveTransferError extends Error {
-  constructor(public code: 'needs_auth' | 'quota_full' | 'retry_wait' | 'not_found' | 'failed' | 'session_expired') {
+  constructor(public code: 'needs_auth' | 'quota_full' | 'retry_wait' | 'not_found' | 'failed' | 'session_expired', public httpStatus?: number, public retryAt?: number) {
     super(code); this.name = 'DriveTransferError';
   }
 }
+export class DriveRangeUnavailable extends Error {}
 
 export interface RemoteFile {
   id: string; size: string; mimeType: string; md5Checksum?: string; sha256Checksum?: string;
 }
+export interface DriveFolder { id: string; name: string; logicalFolderId: string }
 export type TransferProgress = { complete: false; confirmedBytes: number }
   | { complete: true; confirmedBytes: number; file: RemoteFile };
 
@@ -30,13 +34,14 @@ export function validateSessionUri(uri: string) {
 }
 
 function validId(id: string) {
-  if (!/^[A-Za-z0-9_-]{1,200}$/.test(id)) throw new DriveTransferError('failed');
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(id)) throw new DriveTransferError('failed');
   return id;
 }
 
 export class DriveClient {
   // Native browser fetch must retain its Window receiver, not this DriveClient.
-  constructor(private accessToken: () => Promise<string>, private fetcher: typeof fetch = (input, init) => globalThis.fetch(input, init)) {}
+  constructor(private accessToken: () => Promise<string>, private fetcher: typeof fetch = (input, init) => globalThis.fetch(input, init),
+    private onRateLimit?: (ms: number) => Promise<void>) {}
 
   private async request(url: string, init: RequestInit, allowIncomplete = false): Promise<Response> {
     init.signal?.throwIfAborted();
@@ -57,10 +62,13 @@ export class DriveClient {
     const payload = await response.json().catch(() => null);
     const reasons = (payload?.error?.errors || []).map((error: { reason?: string }) => error.reason);
     if (reasons.includes('storageQuotaExceeded')) throw new DriveTransferError('quota_full');
-    if (response.status === 429 || response.status >= 500 || reasons.some((r: string) => ['rateLimitExceeded', 'userRateLimitExceeded'].includes(r))) {
-      throw new DriveTransferError('retry_wait');
+    if (response.status === 429 || reasons.some((r: string) => ['rateLimitExceeded', 'userRateLimitExceeded'].includes(r))) {
+      const delay = retryAfterMs(response.headers.get('Retry-After'));
+      await this.onRateLimit?.(delay);
+      throw new DriveTransferError('retry_wait', 429, Date.now() + delay);
     }
-    throw new DriveTransferError('failed');
+    if (response.status >= 500) throw new DriveTransferError('retry_wait', response.status);
+    throw new DriveTransferError('failed', response.status);
   }
 
   async generateId(signal?: AbortSignal): Promise<string> {
@@ -69,8 +77,50 @@ export class DriveClient {
     return validId(data.ids?.[0] || '');
   }
 
-  async metadata(id: string, signal?: AbortSignal): Promise<RemoteFile & { trashed?: boolean; appProperties?: Record<string, string> }> {
-    return (await this.request(`${DRIVE_API}/files/${validId(id)}?fields=id,size,mimeType,sha256Checksum,trashed,appProperties`, { signal })).json();
+  async metadata(id: string, signal?: AbortSignal): Promise<RemoteFile & { trashed?: boolean; ownedByMe?: boolean; parents?: string[]; appProperties?: Record<string, string> }> {
+    return (await this.request(`${DRIVE_API}/files/${validId(id)}?fields=id,size,mimeType,sha256Checksum,trashed,ownedByMe,parents,appProperties`, { signal })).json();
+  }
+
+  /** Discover only this connection's app-created folders, one bounded page at a time. */
+  async captureExists(fileId: string, ownerHash: string, signal?: AbortSignal): Promise<boolean> {
+    validId(fileId);
+    if (!/^[a-f0-9]{64}$/.test(ownerHash)) throw new DriveTransferError('failed');
+    // Include trash and previous connections. A completed upload whose catalog
+    // commit was lost must never be duplicated by the repair tool.
+    const q = [`appProperties has { key='lecturebagFileId' and value='${fileId}' }`,
+      `appProperties has { key='lecturebagOwner' and value='${ownerHash}' }`].join(' and ');
+    const params = new URLSearchParams({ q, spaces: 'drive', corpora: 'user', pageSize: '1',
+      fields: 'nextPageToken,incompleteSearch,files(id)' });
+    const data = await (await this.request(`${DRIVE_API}/files?${params}`, { signal })).json();
+    if (data.incompleteSearch || !Array.isArray(data.files)) throw new DriveTransferError('retry_wait');
+    return data.files.length > 0 || !!data.nextPageToken;
+  }
+
+  async folders(connectionId: string, ownerHash: string, parentId?: string, pageToken?: string, signal?: AbortSignal) {
+    validId(connectionId);
+    if (!/^[a-f0-9]{64}$/.test(ownerHash)) throw new DriveTransferError('failed');
+    const q = ["mimeType = 'application/vnd.google-apps.folder'", 'trashed = false', "'me' in owners",
+      `appProperties has { key='lecturebagConnectionId' and value='${connectionId}' }`,
+      `appProperties has { key='lecturebagOwner' and value='${ownerHash}' }`,
+      parentId ? `'${validId(parentId)}' in parents` : "appProperties has { key='lecturebagFolderId' and value='root' }"];
+    const params = new URLSearchParams({ q: q.join(' and '), spaces: 'drive', corpora: 'user',
+      pageSize: '50', orderBy: 'name_natural',
+      fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType,trashed,ownedByMe,parents,appProperties)' });
+    if (pageToken) params.set('pageToken', pageToken);
+    const data = await (await this.request(`${DRIVE_API}/files?${params}`, { signal })).json();
+    signal?.throwIfAborted();
+    if (data.incompleteSearch) throw new DriveTransferError('retry_wait');
+    if ((data.files !== undefined && !Array.isArray(data.files)) ||
+      (data.nextPageToken !== undefined && typeof data.nextPageToken !== 'string')) throw new DriveTransferError('failed');
+    const folders: DriveFolder[] = (data.files || []).map(file => {
+      const p = file.appProperties;
+      if (file.trashed || !file.ownedByMe || file.mimeType !== 'application/vnd.google-apps.folder' ||
+        typeof file.name !== 'string' || p?.lecturebagConnectionId !== connectionId || p?.lecturebagOwner !== ownerHash ||
+        typeof p?.lecturebagFolderId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(p.lecturebagFolderId) ||
+        (parentId ? !file.parents?.includes(parentId) : p?.lecturebagFolderId !== 'root')) throw new DriveTransferError('failed');
+      return { id: validId(file.id), name: file.name, logicalFolderId: p.lecturebagFolderId };
+    });
+    return { folders, nextPageToken: data.nextPageToken as string | undefined };
   }
 
   async folder(id: string, name: string, properties: Record<string, string>, parentId?: string, signal?: AbortSignal) {
@@ -93,8 +143,47 @@ export class DriveClient {
     }
   }
 
-  async download(id: string, signal?: AbortSignal): Promise<Blob> {
-    return (await this.request(`${DRIVE_API}/files/${validId(id)}?alt=media`, { signal })).blob();
+  async download(id: string, signal?: AbortSignal, maxBytes?: number): Promise<Blob> {
+    const response = await this.request(`${DRIVE_API}/files/${validId(id)}?alt=media`, { signal });
+    if (maxBytes === undefined) return response.blob();
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new DriveTransferError('failed');
+    if (Number(response.headers.get('Content-Length')) > maxBytes || !response.body) {
+      await response.body?.cancel(); throw new DriveTransferError('failed');
+    }
+    const reader = response.body.getReader();
+    const chunks: BlobPart[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        signal?.throwIfAborted();
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) throw new DriveTransferError('failed');
+        chunks.push(value);
+      }
+      return new Blob(chunks);
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  }
+
+  /** Bounded verified range. Never infer a saved offset from UI progress. */
+  async downloadRange(id: string, offset: number, total: number, signal: AbortSignal) {
+    if (!Number.isSafeInteger(total) || total < 1 || !Number.isSafeInteger(offset) || offset < 0 || offset >= total) throw new DriveTransferError('failed');
+    const end = Math.min(total - 1, offset + 4 * 1024 * 1024 - 1);
+    const response = await this.request(`${DRIVE_API}/files/${validId(id)}?alt=media`, { signal, headers: { Range: `bytes=${offset}-${end}` } });
+    const full = response.status === 200;
+    if (!full && (response.status !== 206 || response.headers.get('Content-Range') !== `bytes ${offset}-${end}/${total}`)) {
+      await response.body?.cancel(); throw new DriveRangeUnavailable('범위 응답을 확인할 수 없습니다.');
+    }
+    const expected = full ? total : end - offset + 1;
+    if (!response.body || Number(response.headers.get('Content-Length')) > expected) { await response.body?.cancel(); throw new DriveTransferError('failed'); }
+    const reader = response.body.getReader(), parts: BlobPart[] = []; let received = 0;
+    try {
+      while (true) { signal.throwIfAborted(); const { value, done } = await reader.read(); if (done) break;
+        received += value.byteLength; if (received > expected) throw new DriveTransferError('failed'); parts.push(value); }
+      if (received !== expected) throw new DriveTransferError('retry_wait');
+      return { blob: new Blob(parts), full };
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
 
   async startUpload(metadata: { id: string; name: string; mimeType: string; parentId: string; appProperties: Record<string, string> },

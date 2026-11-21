@@ -1,3 +1,5 @@
+import { isNativeAndroid } from '../services/native';
+import { NativeCameraPreview } from '../components/NativeCameraPreview';
 import { cameraFrame } from '../utils/cameraFrame';
 /**
  * CameraViewport.tsx — ContentDetail equivalent
@@ -9,10 +11,8 @@ import { cameraFrame } from '../utils/cameraFrame';
  * This component is purely presentational — it receives all state
  * and callbacks from MainView via props.
  */
-import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Camera, Activity, Mic } from 'lucide-react';
-import { useAccentColor } from '../context/AccentColorContext';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { RecordingDisc } from '../components/RecordingDisc';
 import { CameraHUD } from './CameraHUD';
 import { FlashMode, AspectRatio } from '../types';
 import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
@@ -20,6 +20,7 @@ import { drawSimulatedLectureFrame } from '../utils/canvasSimulation';
 interface CameraViewportProps {
   // Camera
   setVideoRef: (el: HTMLVideoElement | null) => void;
+  onNativeCameraStatus?: (status: 'loading' | 'live' | 'denied' | 'unavailable') => void;
   cameraStatus: 'loading' | 'live' | 'denied' | 'unavailable';
   cameraFacing: 'back' | 'front';
   flashMode: FlashMode;
@@ -28,45 +29,46 @@ interface CameraViewportProps {
 
   // Audio mode
   isAudioMode: boolean;
+  suspended?: boolean;
   isRecording: boolean;
   isPaused: boolean;
   recordingSeconds: number;
   formatRecordingTime: (sec: number) => string;
 
   // Handlers
-  onStartRecording: (e?: React.MouseEvent) => void;
-  onStopRecording: (e?: React.MouseEvent) => void;
   onToggleAspectRatio: (e: React.MouseEvent) => void;
   onToggleFlash: (e?: React.MouseEvent) => void;
   onToggleCameraFacing: (e?: React.MouseEvent) => void;
   onToggleCameraMenu: (e: React.MouseEvent) => void;
-  onExitAudioMode: () => void;
 }
 
 export const CameraViewport: React.FC<CameraViewportProps> = ({
   setVideoRef,
   cameraStatus,
+  onNativeCameraStatus,
   cameraFacing,
   flashMode,
   aspectRatio,
   isCameraMenuOpen,
   isAudioMode,
+  suspended = false,
   isRecording,
   isPaused,
   recordingSeconds,
   formatRecordingTime,
-  onStartRecording,
-  onStopRecording,
   onToggleAspectRatio,
   onToggleFlash,
   onToggleCameraFacing,
   onToggleCameraMenu,
-  onExitAudioMode,
 }) => {
-  const { accentColor } = useAccentColor();
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
   const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const hasLiveFrame = useRef(false);
+  const bindVideoRef = useCallback((element: HTMLVideoElement | null) => {
+    localVideoRef.current = element;
+    setVideoRef(element);
+  }, [setVideoRef]);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -75,7 +77,10 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
     if (!element) return;
     const measure = () => {
       const { width, height } = element.getBoundingClientRect();
-      setViewportSize({ width, height });
+      setViewportSize(previous => {
+        const next = { width: Math.round(width), height: Math.round(height) };
+        return previous.width === next.width && previous.height === next.height ? previous : next;
+      });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -84,33 +89,32 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
   }, []);
   const frame = cameraFrame(viewportSize.width, viewportSize.height, aspectRatio);
 
-  // ── 60fps Canvas Direct Render Pipeline ──────────────────────────────────
+  // ── Video-frame Canvas Render Pipeline ──────────────────────────────────
   // Bypasses iOS WebKit's <video> hardware letterbox clipping entirely by
   // painting the video frames directly onto an edge-to-edge HTML5 Canvas surface.
   useEffect(() => {
-    if (isAudioMode) return;
+    if (isAudioMode || suspended || isNativeAndroid()) return;
 
+    if (cameraStatus !== 'live') hasLiveFrame.current = false;
     let time = 0;
-    let animId: number;
+    let animId = 0;
+    let videoFrameId = 0;
+    const cvs = liveCanvasRef.current;
+    const video = localVideoRef.current;
+    if (!cvs) return;
+    const ctx = cvs.getContext('2d', { alpha: false });
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const targetW = Math.round(frame.width * dpr);
+    const targetH = Math.round(frame.height * dpr);
+    if (cvs.width !== targetW || cvs.height !== targetH) {
+      cvs.width = targetW; cvs.height = targetH;
+    }
+    const useVideoFrames = cameraStatus === 'live' && video && typeof video.requestVideoFrameCallback === 'function';
 
     const renderLoop = () => {
       time += 0.025;
-      const cvs = liveCanvasRef.current;
-      const video = localVideoRef.current;
-
       if (cvs) {
-        const rect = cvs.getBoundingClientRect();
-        if (rect.width && rect.height) {
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          const targetW = Math.round(rect.width * dpr);
-          const targetH = Math.round(rect.height * dpr);
-
-          if (cvs.width !== targetW || cvs.height !== targetH) {
-            cvs.width = targetW;
-            cvs.height = targetH;
-          }
-
-          const ctx = cvs.getContext('2d', { alpha: false });
+        if (targetW && targetH) {
           if (ctx) {
             if (cameraStatus === 'live' && video && video.readyState >= 2) {
               const vW = video.videoWidth || 1280;
@@ -139,23 +143,30 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
               }
               ctx.drawImage(video, sX, sY, sW, sH, 0, 0, targetW, targetH);
               ctx.restore();
-            } else {
-              // Camera loading / simulation animation
+              hasLiveFrame.current = true;
+            } else if (!hasLiveFrame.current) {
+              // Only show the placeholder before the first real camera frame.
+              // Mobile Safari can briefly lower readyState between otherwise
+              // valid frames; retaining the last frame prevents a visible flash.
               drawSimulatedLectureFrame(ctx, targetW, targetH, 'PPT/판서', time);
             }
           }
         }
       }
 
-      animId = requestAnimationFrame(renderLoop);
+      if (useVideoFrames) videoFrameId = video.requestVideoFrameCallback(renderLoop);
+      else animId = requestAnimationFrame(renderLoop);
     };
 
     renderLoop();
-    return () => cancelAnimationFrame(animId);
-  }, [cameraStatus, cameraFacing, isAudioMode, aspectRatio]);
+    return () => {
+      cancelAnimationFrame(animId);
+      if (videoFrameId) video?.cancelVideoFrameCallback(videoFrameId);
+    };
+  }, [cameraStatus, cameraFacing, isAudioMode, suspended, frame.width, frame.height]);
 
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (isRecording) return;
+    if (isAudioMode) return;
     const rect = e.currentTarget.getBoundingClientRect();
     setFocusPoint({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     setTimeout(() => setFocusPoint(null), 1200);
@@ -165,86 +176,28 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
     <div
       ref={viewportRef}
       onClick={handleViewportTap}
-      className="absolute inset-0 w-full h-full bg-black overflow-hidden flex items-center justify-center select-none"
+      className={`absolute inset-0 w-full h-full ${isNativeAndroid() ? '' : 'bg-black'} overflow-hidden flex items-center justify-center select-none`}
     >
       {isAudioMode ? (
         /* ── Audio Waveform Visualizer Mode ── */
         <div className="relative w-full h-full bg-neutral-950 flex flex-col items-center justify-between py-6 px-6 select-none overflow-hidden">
-          {/* Return to Camera Button */}
-          <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (isRecording) onStopRecording(e);
-                onExitAudioMode();
-              }}
-              className="bg-neutral-900/80 backdrop-blur-md border border-white/20 hover:border-white/40 text-neutral-300 hover:text-white w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-all shadow-lg"
-              title="카메라 모드로 돌아가기"
-            >
-              <Camera className="w-5.5 h-5.5" />
-            </button>
-          </div>
-
           {/* Central Visualizer */}
-          <div className="relative flex flex-col items-center justify-center my-auto w-full max-w-xs">
-            <div className="w-16 h-16 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center text-neutral-300 mb-6 shadow-inner">
-              <Mic
-                className="w-7 h-7"
-                style={{ color: isRecording ? (!isPaused ? '#D30000' : accentColor) : '#737373' }}
-              />
-            </div>
+          <RecordingDisc paused={!isRecording || isPaused} time={formatRecordingTime(recordingSeconds)} />
 
-            {/* Waveform Bars */}
-            <div className="flex items-center justify-center gap-1.5 h-14 w-full px-4">
-              {[30, 65, 25, 85, 45, 95, 70, 40, 80, 55, 90, 75, 60, 80, 30, 65, 45, 85, 25, 55].map(
-                (baseH, idx) => {
-                  const h = !isRecording ? 10 : isPaused ? 12 : baseH;
-                  return (
-                    <div
-                      key={idx}
-                      style={{ height: `${h}%`, transition: 'height 0.15s ease-in-out' }}
-                      className={`w-1 rounded-full ${
-                        !isRecording
-                          ? 'bg-neutral-850'
-                          : isPaused
-                          ? 'bg-neutral-800'
-                          : idx % 3 === 0
-                          ? 'bg-[#D30000]'
-                          : 'bg-neutral-300'
-                      }`}
-                    />
-                  );
-                }
-              )}
-            </div>
-
-            {/* Timer */}
-            <div className="mt-6 font-mono text-4xl font-bold tracking-widest text-white">
-              {formatRecordingTime(recordingSeconds)}
-            </div>
-          </div>
-
-          {/* Status Label */}
-          <div className="text-[10px] text-neutral-500 flex items-center gap-1.5 font-mono">
-            <Activity className="w-3 h-3 text-neutral-400" />
-            <span>
-              {isRecording
-                ? isPaused
-                  ? '녹음 일시정지됨'
-                  : '실시간 오디오 수집 중'
-                : '음성 녹음 대기 중 (저장 완료)'}
-            </span>
-          </div>
+        </div>
+      ) : isNativeAndroid() ? (
+        <div className="absolute inset-0 flex items-center justify-center">
+          {!suspended && <div className="relative shrink-0" style={frame}><NativeCameraPreview facing={cameraFacing} flash={flashMode} onStatus={onNativeCameraStatus!} /></div>}
+          <CameraHUD cameraStatus={cameraStatus} cameraFacing={cameraFacing} flashMode={flashMode} aspectRatio={aspectRatio}
+            isCameraMenuOpen={isCameraMenuOpen} focusPoint={focusPoint} onToggleAspectRatio={onToggleAspectRatio}
+            onToggleFlash={onToggleFlash} onToggleCameraFacing={onToggleCameraFacing} onToggleCameraMenu={onToggleCameraMenu} />
         </div>
       ) : (
         /* ── Normal Camera Viewport Mode ── */
         <div className="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden bg-black">
           {/* Hidden Background Video Stream Receiver */}
           <video
-            ref={(el) => {
-              localVideoRef.current = el;
-              setVideoRef(el);
-            }}
+            ref={bindVideoRef}
             autoPlay
             playsInline
             muted
@@ -299,7 +252,6 @@ export const CameraViewport: React.FC<CameraViewportProps> = ({
             aspectRatio={aspectRatio}
             isCameraMenuOpen={isCameraMenuOpen}
             focusPoint={focusPoint}
-            onStartRecording={onStartRecording}
             onToggleAspectRatio={onToggleAspectRatio}
             onToggleFlash={onToggleFlash}
             onToggleCameraFacing={onToggleCameraFacing}

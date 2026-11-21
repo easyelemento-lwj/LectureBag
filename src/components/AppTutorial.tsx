@@ -1,36 +1,35 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { RECORDING_ENABLED } from '../utils/featureFlags';
 import { ArrowLeft, ArrowRight, X, Camera, Folder, Image, Mic, Pause, Play, Square, Download, Sparkles, ArrowUpDown, Plus, Search, LayoutGrid, CalendarDays, FileText, Activity, CheckCircle2, type LucideIcon } from 'lucide-react';
 
 type Control = { id: string; label: string; icon: LucideIcon };
 export type TutorialStep = { chapter: number; screen: string; target: string; title: string; description: string; controls: Control[]; selected?: number; items?: { target: string; anchor?: string; title: string; description: string }[] };
 const c = (id: string, label: string, icon: LucideIcon): Control => ({ id, label, icon });
-const camera = [c('photo', '최근 사진', Image), c('capture', '사진 찍기', Camera), c('folder', '파일 탐색기', Folder), c('audio', '녹음 모드', Mic)];
-const audio = [c('recordings', '최근 녹음', Mic), c('record', '녹음 시작', Mic), c('folder', '파일 탐색기', Folder)];
+const camera = [c('audio', '녹음 모드', Mic), c('capture', '사진 찍기', Camera), c('folder', '파일 탐색기', Folder)];
+const audio = [c('camera', '카메라 모드', Camera), c('record', '녹음 시작', Mic), c('folder', '파일 탐색기', Folder)];
 const recording = [audio[0], c('pause', '일시정지', Pause), c('stop', '멈추고 저장', Square)];
 const paused = [audio[0], c('resume', '재개', Play), recording[2]];
 const explorer = [c('add', '파일 추가', Plus), c('search', '파일 검색', Search), c('apps', '앱센터', LayoutGrid), c('filters', '전체 / 사진 / 녹음', Folder), c('photos', '사진', Image), c('audios', '녹음', Mic), c('child', '2026년 › 하반기 › 9월', Folder)];
-const selection = [c('file', '판서_01.jpg', CheckCircle2), c('file2', '판서_02.jpg', Image), c('file3', '강의_03.m4a', Mic), c('download', '다운로드', Download), c('ai', 'AI 정리', Sparkles), c('reorder', '순서 변경', ArrowUpDown)];
-const apps = [c('timetable', '시간표 등록', CalendarDays), c('aiCenter', 'AI 센터', Sparkles)];
+const selection = [c('file', '판서_01.jpg', CheckCircle2), c('file2', '판서_02.jpg', Image), c('file3', '강의_03.m4a', Mic), c('download', '다운로드', Download), c('reorder', '순서 변경', ArrowUpDown)];
+const apps = [c('timetable', '시간표 등록', CalendarDays)];
 const timetable = [c('default', '디폴트 모드 적용', Folder), c('schedule', '시간표 모드 적용', CalendarDays), c('upload', '새로운 시간표 추가하기', Plus)];
-const aiCenter = [c('document', '강의 요약.md', FileText), c('sessions', '진행 중인 AI 정리', Activity)];
 const step = (chapter: number, screen: string, controls: Control[], target: string, title: string, description: string, selected?: number): TutorialStep => ({ chapter, screen, controls, target, title, description, selected });
 export const tutorialSteps: TutorialStep[] = [
   {
-    ...step(1, '카메라 화면', camera, 'capture', '카메라 화면을 살펴보세요', '촬영, 파일 탐색기, 최근 사진, 녹음 기능을 한곳에서 이용해요.'),
+    ...step(1, '카메라 화면', camera, 'capture', '카메라 화면을 살펴보세요', '촬영, 파일 탐색기, 녹음 모드 전환을 하단에서 이용해요.'),
     items: [
       { target: 'capture', title: '판서를 찍어보세요', description: '촬영 버튼으로 강의 화면을 사진으로 남겨요.' },
       { target: 'folder', title: '기록은 폴더에 모여요', description: '폴더 버튼으로 저장된 사진과 녹음을 찾아요.' },
-      { target: 'photo', title: '방금 찍은 사진을 확인해요', description: '최근 사진 버튼으로 촬영한 사진을 확인해요.' },
-      { target: 'audio', title: '강의 음성도 남겨보세요', description: '마이크 버튼으로 녹음 화면을 열고 녹음을 시작해요.' },
+      { target: 'audio', title: '강의 음성도 남겨보세요', description: '하단 왼쪽 마이크 버튼으로 녹음 화면을 열어요. 가운데 녹음 버튼을 누르면 녹음이 시작돼요.' },
     ],
   },
   {
-    ...step(3, '녹음 화면', [...recording, paused[1]], 'pause', '녹음 화면을 살펴보세요', '일시정지, 재개, 저장, 최근 녹음 확인 방법을 함께 알아봐요.'),
+    ...step(3, '녹음 화면', [...recording, paused[1]], 'pause', '녹음 화면을 살펴보세요', '일시정지, 재개, 저장, 카메라 전환 방법을 함께 알아봐요.'),
     items: [
       { target: 'pause', title: '잠깐 쉬어갈 수 있어요', description: '일시정지 버튼으로 녹음을 잠시 멈춰요.' },
       { target: 'resume', anchor: 'pause', title: '이어서 녹음해요', description: '일시정지하면 같은 버튼이 재개 버튼으로 바뀌어요. 누르면 이어서 녹음해요.' },
       { target: 'stop', title: '멈추고 저장해요', description: '네모 버튼으로 녹음을 종료하고 저장해요.' },
-      { target: 'recordings', title: '최근 녹음을 확인해요', description: '최근 녹음 버튼으로 저장한 음성을 확인하고 재생해요.' },
+      { target: 'camera', title: '카메라로 돌아가요', description: '하단 왼쪽 카메라 버튼으로 전환해요. 녹음 중이라면 녹음을 종료하고 저장해요.' },
     ],
   },
   step(3, '녹음 화면', audio, 'folder', '이제 파일 탐색기를 살펴볼게요', '폴더 버튼으로 저장된 사진과 녹음을 관리할 수 있어요. 다음을 누르면 파일 탐색기로 이동해요.'),
@@ -39,7 +38,7 @@ export const tutorialSteps: TutorialStep[] = [
     items: [
       { target: 'add', title: '기존 파일도 추가해요', description: '더하기 버튼으로 기기에 있는 파일을 가져와요. 촬영일 기준으로 분류하거나 저장할 날짜를 지정할 수 있어요.' },
       { target: 'search', title: '필요한 파일을 검색해요', description: '검색 버튼을 누르고 파일 이름을 입력해 원하는 자료를 찾아보세요.' },
-      { target: 'apps', title: '앱센터를 열어요', description: '앱센터 버튼에서 시간표 등록과 AI 센터로 이동할 수 있어요.' },
+      { target: 'apps', title: '앱센터를 열어요', description: '앱센터 버튼에서 시간표 등록과 앱 설정로 이동할 수 있어요.' },
     ],
   },
   step(5, '파일 탐색기', explorer, 'filters', '종류별로 기록을 골라봐요', '전체에서는 사진과 녹음을 함께 보고, 사진이나 녹음 버튼을 누르면 원하는 종류의 파일만 모아볼 수 있어요.'),
@@ -47,15 +46,14 @@ export const tutorialSteps: TutorialStep[] = [
   step(6, '파일 탐색기 · 선택 기능', [c('hold', '9월 15일 폴더 · 길게 누르기', Folder)], 'hold', '길게 눌러 한 번에 선택해요', '폴더를 길게 누르면 선택 모드가 시작되고 폴더 안의 파일들이 함께 선택돼요.'),
   step(6, '최하위 폴더 · 선택 기능', selection, 'file', '필요한 파일만 남겨요', '폴더 안의 파일 3개가 모두 선택됐어요. 최하위 폴더에서는 파일을 눌러 개별 선택을 해제하거나 다시 선택할 수 있어요.', 3),
   {
-    ...step(6, '최하위 폴더 · 선택 기능', selection, 'download', '선택한 파일을 활용해보세요', '다운로드, AI 정리, 파일 순서 변경 방법을 함께 알아봐요.', 3),
+    ...step(6, '최하위 폴더 · 선택 기능', selection, 'download', '선택한 파일을 활용해보세요', '다운로드, 파일 순서 변경 방법을 함께 알아봐요.', 3),
     items: [
       { target: 'download', title: '선택한 파일을 내려받아요', description: '다운로드 버튼으로 선택한 자료를 기기에 저장해요.' },
-      { target: 'ai', title: '선택한 자료를 AI로 정리해요', description: 'AI 버튼으로 사진과 녹음을 정리해요. 결과와 진행 상황은 AI 센터에서 확인해요.' },
       { target: 'reorder', title: '한 파일의 위치를 바꿔요', description: '1개 선택 후 순서 변경을 누르고 카드를 끌어 옮겨요. 최하위 폴더에 파일이 2개 이상 있어야 해요.' },
       { target: 'reorder', title: '여러 파일을 묶어서 옮겨요', description: '2개 이상 선택하면 묶음으로 이동해요. 위치를 옮긴 뒤 순서 변경 버튼을 다시 누르면 적용돼요.' },
     ],
   },
-  step(6, '파일 탐색기', explorer, 'apps', '이제 앱 센터를 살펴볼게요', '앱 센터 버튼에서 시간표와 AI 정리 기능을 만날 수 있어요. 다음을 누르면 앱 센터로 이동해요.'),
+  step(6, '파일 탐색기', explorer, 'apps', '이제 앱 센터를 살펴볼게요', '앱 센터 버튼에서 시간표 등록과 설정 기능을 만날 수 있어요. 다음을 누르면 앱 센터로 이동해요.'),
   step(7, '앱센터', apps, 'timetable', '시간표를 등록해요', '시간표 등록에서 자료가 저장되는 분류 방식을 설정하고 수업 시간표를 추가할 수 있어요.'),
   {
     ...step(8, '시간표 등록', timetable, 'default', '기록을 정리하는 방법을 골라보세요', '디폴트 모드와 시간표 모드의 차이를 함께 알아봐요.'),
@@ -64,20 +62,16 @@ export const tutorialSteps: TutorialStep[] = [
       { target: 'schedule', title: '수업에 맞춰 정리해요', description: '시간표 사진을 등록하고 시간표 모드를 적용하면 강의 시간에 맞춰 연도 → 학기 → 과목 → 달 → 일 순서로 자동 분류해요.' },
     ],
   },
-  step(7, '앱센터', apps, 'aiCenter', 'AI 정리 자료를 모아봐요', 'AI 센터에서는 정리된 문서와 진행 중인 정리 작업을 확인할 수 있어요.'),
-  {
-    ...step(9, 'AI 센터', aiCenter, 'document', 'AI 정리 결과를 확인해보세요', '정리된 문서와 진행 중인 작업을 한곳에서 확인해요.'),
-    items: [
-      { target: 'document', title: '정리된 내용을 열어봐요', description: 'AI 정리가 끝난 파일을 누르면 요약 문서를 읽을 수 있어요.' },
-      { target: 'sessions', title: '진행 상황도 확인해요', description: '진행 현황 버튼을 누르면 진행 중인 AI 정리 세션과 작업 상태를 볼 수 있어요.' },
-    ],
-  },
 ];
 
 export type TutorialSection = 'camera' | 'explorer' | 'apps';
 export const tutorialSections: Record<TutorialSection, TutorialStep[]> = {
-  camera: tutorialSteps.filter(s => s.chapter < 5 && s.target !== 'folder'),
-  explorer: tutorialSteps.filter(s => (s.chapter === 5 || s.chapter === 6) && s.target !== 'apps'),
+  camera: tutorialSteps.filter(s => s.chapter < 5 && s.target !== 'folder' && (RECORDING_ENABLED || s.chapter < 3)).map(s => RECORDING_ENABLED ? s : ({ ...s,
+    description: '촬영과 파일 탐색기를 하단에서 이용해요.',
+    controls: s.controls.filter(control => control.id !== 'audio'),
+    items: s.items?.filter(item => item.target !== 'audio'),
+  })),
+  explorer: tutorialSteps.filter(s => (s.chapter === 5 || s.chapter === 6) && s.target !== 'apps' && (RECORDING_ENABLED || s.target !== 'filters')),
   apps: tutorialSteps.filter(s => s.chapter >= 7),
 };
 

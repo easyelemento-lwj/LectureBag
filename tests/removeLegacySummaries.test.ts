@@ -1,0 +1,35 @@
+import 'fake-indexeddb/auto';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createStore, get, set, keys } from 'idb-keyval';
+import { accountKey, documentKey } from '../src/utils/accountStorage';
+import { removeLegacySummaries } from '../src/utils/removeLegacySummaries';
+
+test('removes summaries and jobs only for this account, preserving originals and regular documents', async () => {
+  const values = new Map<string, string>();
+  const storage = { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => { values.set(k, v); }, removeItem: (k: string) => { values.delete(k); }, key: (i: number) => [...values.keys()][i] ?? null, get length() { return values.size; } } as Storage;
+  const summary = { id: 'ai_doc_1', name: 'renamed.md', type: 'document', timestamp: '2026-01-01' };
+  const document = { ...summary, id: 'imported_1', name: 'notes.md' };
+  storage.setItem(accountKey('alice', 'ai_docs'), JSON.stringify([summary, document]));
+  storage.setItem(documentKey('alice', summary.id), 'summary');
+  storage.setItem(documentKey('alice', document.id), 'notes');
+  storage.setItem(documentKey('bob', summary.id), 'other account');
+  const db = createStore('keyval-store', 'keyval');
+  const jobs = createStore('lecturebag-ai-jobs', 'jobs');
+  await set(accountKey('alice', 'ai_job:1'), { summary: 'partial' }, jobs);
+  await set(accountKey('bob', 'ai_job:1'), { summary: 'other' }, jobs);
+  await set('lecture_snap_photos_alice', [{ id: 'photo1', dataUrl: 'original' }], db);
+  await set('lecture_snap_trash_alice', [{ file: { ...summary, id: 'ai_doc_trash' }, documentContent: 'trash summary', deletedAt: '2026-01-01', restored: true }], db);
+  storage.setItem(documentKey('alice', 'ai_doc_trash'), 'trash summary');
+  await removeLegacySummaries('alice', storage);
+  await removeLegacySummaries('alice', storage);
+  assert.equal(storage.getItem(documentKey('alice', summary.id)), null);
+  assert.equal(storage.getItem(documentKey('alice', 'ai_doc_trash')), null);
+  assert.equal(storage.getItem(documentKey('alice', document.id)), 'notes');
+  assert.equal(storage.getItem(documentKey('bob', summary.id)), 'other account');
+  assert.deepEqual(JSON.parse(storage.getItem(accountKey('alice', 'ai_docs'))!), [document]);
+  assert.deepEqual(await keys(jobs), [accountKey('bob', 'ai_job:1')]);
+  assert.deepEqual(await get('lecture_snap_photos_alice', db), [{ id: 'photo1', dataUrl: 'original' }]);
+  const trash = await get<any[]>('lecture_snap_trash_alice', db);
+  assert.ok(trash?.every(e => e.purged && !e.documentContent));
+});

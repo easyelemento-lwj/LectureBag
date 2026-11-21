@@ -10,24 +10,20 @@ import { getAppCapabilities } from '../utils/appCapabilities';
  *
  * No business logic or camera stream code lives here.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { AppTutorial, tutorialSections, type TutorialSection } from '../components/AppTutorial';
 import { useAuth } from '../hooks/useAuth';
-import { useDriveSync } from '../context/DriveSyncContext';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useAppState } from '../models/useAppState';
 import { CameraViewport } from './CameraViewport';
 import { BottomNav } from './BottomNav';
-import { RecentPhotosModal } from '../components/RecentPhotosModal';
-import { RecentRecordingsModal } from '../components/RecentRecordingsModal';
-import { FolderExplorerModal } from '../components/FolderExplorerModal';
+const FolderExplorerModal = lazy(() => import('../components/FolderExplorerModal').then(module => ({ default: module.FolderExplorerModal })));
 
 export const MainView: React.FC = () => {
   const [capabilities] = useState(() => getAppCapabilities());
   const { canCapture } = capabilities;
   const state = useAppState(canCapture);
-  const driveSync = useDriveSync();
   const { user } = useAuth();
   const tourOwner = user?.uid ?? 'guest';
   const seenTours = useRef(new Set<TutorialSection>());
@@ -62,16 +58,17 @@ export const MainView: React.FC = () => {
   const enterAppCenter = useCallback(() => startTour('apps'), [startTour]);
   const tourSteps = tutorialSections[tourSection];
   const tourStep = tourOpen ? tourSteps[tourIndex] : undefined;
-  const audioMode = tourStep ? tourStep.chapter === 3 || tourStep.chapter === 4 : state.isAudioMode;
+  const audioMode = RECORDING_ENABLED && (tourStep ? tourStep.chapter === 3 || tourStep.chapter === 4 : state.isAudioMode);
   // Only the presentation changes during the guide; MediaRecorder is never started.
   const recording = tourStep ? ['pause', 'resume', 'stop'].includes(tourStep.target) : state.isRecording;
   const paused = tourStep ? ['resume', 'stop'].includes(tourStep.target) : state.isPaused;
+  const explorerVisible = !canCapture || (tourStep ? tourStep.chapter >= 5 : state.isFolderExplorerOpen);
+  const [explorerLoaded, setExplorerLoaded] = useState(!canCapture);
+  useEffect(() => { if (explorerVisible) setExplorerLoaded(true); }, [explorerVisible]);
   const closeTour = (completed: boolean) => {
     if (completed) {
-      state.setIsRecentModalOpen(false);
-      state.setIsRecentRecordingsModalOpen(false);
       if (tourSection === 'camera' && canCapture) {
-        state.setIsAudioMode(true);
+        state.setIsAudioMode(RECORDING_ENABLED);
         state.setIsFolderExplorerOpen(false);
       } else {
         state.setIsFolderExplorerOpen(true);
@@ -82,10 +79,14 @@ export const MainView: React.FC = () => {
   };
 
   return (
-    <div className="absolute inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
-      {state.captureError && <div role="alert" className="absolute top-16 left-4 right-4 z-[100] rounded-xl bg-red-950 p-3 text-sm">
+    <div className="camera-shell absolute inset-0 w-full h-full bg-black text-white overflow-hidden select-none font-sans">
+      {!state.isRecording && !state.recordingSaving && state.recoverableRecordingCount > 0 && <div role="status" className="absolute bottom-32 left-4 right-4 z-[100] rounded-xl bg-amber-950 p-3 text-sm">
+        <p>중간 저장된 녹음 {state.recoverableRecordingCount}개가 있습니다. 복구 파일은 끝부분이 없거나 재생이 안 될 수 있습니다.</p>
+        <button type="button" onClick={state.recoverInterruptedRecording} className="mt-2 underline">중단된 녹음 기기에 복구</button>
+      </div>}
+      {state.captureError && <div role="alert" className="absolute bottom-32 left-4 right-4 z-[100] rounded-xl bg-red-950 p-3 text-sm">
         <p>{state.captureError}</p>
-        {state.canRetryCaptureSave && <button type="button" onClick={state.retryCaptureSave} className="mt-2 underline">사진 저장 다시 시도</button>}
+        {state.canRetryCaptureSave && <button type="button" onClick={state.retryCaptureSave} className="mt-2 underline">기기 저장 다시 시도</button>}
       </div>}
 
       {/* Global Shutter Flash Animation */}
@@ -106,17 +107,17 @@ export const MainView: React.FC = () => {
       <CameraViewport
         setVideoRef={state.setVideoRef}
         cameraStatus={state.cameraStatus}
+        onNativeCameraStatus={state.setNativeCameraStatus}
         cameraFacing={state.cameraFacing}
         flashMode={state.flashMode}
         aspectRatio={state.aspectRatio}
         isCameraMenuOpen={state.isCameraMenuOpen}
         isAudioMode={audioMode}
+        suspended={explorerVisible}
         isRecording={recording}
         isPaused={paused}
         recordingSeconds={tourStep ? 12 : state.recordingSeconds}
         formatRecordingTime={state.formatRecordingTime}
-        onStartRecording={state.handleStartRecording}
-        onStopRecording={state.handleStopRecording}
         onToggleAspectRatio={state.toggleAspectRatio}
         onToggleFlash={state.toggleFlashMode}
         onToggleCameraFacing={state.toggleCameraFacing}
@@ -124,15 +125,7 @@ export const MainView: React.FC = () => {
           e.stopPropagation();
           state.setIsCameraMenuOpen((prev) => !prev);
         }}
-        onExitAudioMode={() => state.setIsAudioMode(false)}
       />
-
-      {driveSync.enabled && !state.isFolderExplorerOpen && !audioMode && <div aria-live="polite"
-        className="absolute left-3 bottom-28 z-20 max-w-[85%] rounded-lg bg-black/60 px-2 py-1 text-[11px] pointer-events-none">
-        {driveSync.error || (driveSync.busy ? '사진을 기기에 저장했습니다 · Drive 업로드 중…'
-          : driveSync.connection?.connected ? `Drive 자동 업로드 · 완료 ${driveSync.jobs.filter(job => job.state === 'synced').length}개 / 대기 ${driveSync.jobs.filter(job => !['synced', 'cancelled'].includes(job.state)).length + driveSync.waiting}개`
-          : '사진은 기기에 저장됩니다 · 앱 센터에서 Drive 연결을 확인해 주세요.')}
-      </div>}
 
       {/* ── Floating Bottom Navigation Bar ── */}
       <div
@@ -143,15 +136,17 @@ export const MainView: React.FC = () => {
           isAudioMode={audioMode}
           isRecording={recording}
           isPaused={paused}
-          photos={state.photos}
-          recordings={state.recordings}
+          recordingTime={state.formatRecordingTime(state.recordingSeconds)}
+          recordingSaving={state.recordingSaving}
           captureDisabled={state.captureDisabled}
           onTakeSnapshot={state.handleTakeSnapshot}
           onStartRecording={state.handleStartRecording}
           onTogglePauseRecording={state.handleTogglePauseRecording}
           onStopRecording={state.handleStopRecording}
-          onOpenRecentPhotos={() => state.setIsRecentModalOpen(true)}
-          onOpenRecentRecordings={() => state.setIsRecentRecordingsModalOpen(true)}
+          onSwitchMode={() => {
+            if (tourStep) return;
+            state.setIsAudioMode(!state.isAudioMode);
+          }}
           onOpenFolder={state.handleFolderButtonClick}
         />
       </div>
@@ -161,23 +156,8 @@ export const MainView: React.FC = () => {
       {/* ── Modals ── */}
       {tourOpen && <AppTutorial steps={tourSteps} index={tourIndex} onStepChange={setTourIndex} onClose={closeTour} />}
 
-      {canCapture && <>
-      <RecentPhotosModal
-        isOpen={tourStep ? tourStep.chapter === 2 : state.isRecentModalOpen}
-        onClose={() => state.setIsRecentModalOpen(false)}
-        photos={state.photos}
-        onDeletePhoto={state.handleDeletePhoto}
-      />
 
-      <RecentRecordingsModal
-        isOpen={tourStep ? tourStep.chapter === 4 : state.isRecentRecordingsModalOpen}
-        onClose={() => state.setIsRecentRecordingsModalOpen(false)}
-        recordings={state.recordings}
-        onDeleteRecording={state.handleDeleteRecording}
-      />
-
-      </>}
-
+      {(explorerVisible || explorerLoaded) && <Suspense fallback={<div role="status" className="absolute inset-0 z-50 grid place-items-center bg-white text-neutral-500">자료 불러오는 중…</div>}>
       <FolderExplorerModal
         canCapture={canCapture}
         onDeletePhoto={state.handleDeletePhoto}
@@ -186,7 +166,7 @@ export const MainView: React.FC = () => {
         completedTutorial={completedTour}
         onReplayTutorial={(section) => startTour(section, true)}
         onEnterAppCenter={enterAppCenter}
-        isOpen={!canCapture || (tourStep ? tourStep.chapter >= 5 : state.isFolderExplorerOpen)}
+        isOpen={explorerVisible}
         onClose={() => { if (canCapture) state.setIsFolderExplorerOpen(false); }}
         currentDocument={state.currentDocument}
         onSelectDocument={(docName) => state.setCurrentDocument(docName)}
@@ -199,7 +179,10 @@ export const MainView: React.FC = () => {
         setStorageMode={state.setStorageMode}
         timetables={state.timetables}
         setTimetables={state.setTimetables}
+        timetableSync={state.timetableSync}
       />
+      </Suspense>}
     </div>
   );
 };
+import { RECORDING_ENABLED } from '../utils/featureFlags';

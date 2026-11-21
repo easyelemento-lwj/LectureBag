@@ -1,5 +1,6 @@
 import { getAppCapabilities } from '../utils/appCapabilities';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { desktopBridge } from '../services/desktop';
 import { useAuth } from '../hooks/useAuth';
 import { Camera, CalendarDays, FolderOpen, Loader2, AlertCircle } from 'lucide-react';
 
@@ -22,11 +23,14 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   ];
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const desktop = desktopBridge();
+  const [loginCode, setLoginCode] = useState('');
+  useEffect(() => desktop?.onLoginCode(setLoginCode), [desktop]);
 
   if (loading) {
     return (
       <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-neutral-50 text-neutral-900">
-        <img src="/lecturebag-logo.png" alt="" width={64} height={64} className="h-16 w-16 shrink-0 rounded-2xl object-contain" />
+        <img src="/lecturebag-logo.png" alt="" width={64} height={64} className="h-16 w-16 shrink-0 object-contain" />
         <p className="text-xl font-bold tracking-tight">LectureBag</p>
         <div role="status" className="flex items-center gap-2 text-xs font-medium text-neutral-500">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -42,6 +46,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     try {
       setIsSigningIn(true);
       setErrorMessage(null);
+      setLoginCode('');
       const res = await signInWithGoogle();
       if (res.error) setErrorMessage(res.error);
     } catch (err: unknown) {
@@ -58,7 +63,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     >
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col md:max-w-xl lg:max-w-5xl">
         <header className="flex items-center gap-2.5">
-          <img src="/lecturebag-logo.png" alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded-xl object-contain md:h-12 md:w-12" />
+          <img src="/lecturebag-logo.png" alt="" width={40} height={40} className="h-10 w-10 shrink-0 object-contain md:h-12 md:w-12" />
           <span className="text-base font-bold tracking-tight">LectureBag</span>
         </header>
 
@@ -139,8 +144,13 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             )}
           </button>
           <p className="text-center text-[11px] leading-relaxed text-neutral-500">
-            Google 계정으로 로그인하고 시작하세요.
+            {desktop ? '기본 브라우저에서 Google 로그인 후 이 PC의 로그인을 승인하세요.' : 'Google 계정으로 로그인하고 시작하세요.'}
           </p>
+          {desktop && isSigningIn && <div className="space-y-2 rounded-xl border bg-white p-4 text-center text-sm">
+            <p>브라우저의 확인 코드가 같은지 확인해 주세요.</p>
+            <p className="font-mono text-2xl tracking-widest">{loginCode || '준비 중…'}</p>
+            <button type="button" className="underline" onClick={() => void desktop.cancelSignIn()}>로그인 취소</button>
+          </div>}
         </div>
         </div>
       </div>

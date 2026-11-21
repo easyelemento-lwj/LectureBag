@@ -58,6 +58,10 @@ export class IndexedDbUploadJobStore implements UploadJobStore {
   }
 
   list(identity: DriveIdentity): Promise<UploadJob[]> {
+    return this.listOwner(identity.ownerUid, identity.connectionId);
+  }
+
+  listOwner(ownerUid: string, connectionId?: string): Promise<UploadJob[]> {
     return this.store('readonly', store => new Promise((resolve, reject) => {
       const request = store.openCursor();
       const jobs: UploadJob[] = [];
@@ -65,7 +69,7 @@ export class IndexedDbUploadJobStore implements UploadJobStore {
         const cursor = request.result;
         if (!cursor) return;
         const job: UploadJob = cursor.value;
-        if (job.ownerUid === identity.ownerUid && job.connectionId === identity.connectionId) jobs.push(job);
+        if (job.ownerUid === ownerUid && (!connectionId || job.connectionId === connectionId)) jobs.push(job);
         cursor.continue();
       };
       store.transaction.oncomplete = () => resolve(jobs);

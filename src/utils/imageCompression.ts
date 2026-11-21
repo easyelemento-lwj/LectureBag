@@ -1,10 +1,7 @@
 /**
  * imageCompression.ts
  *
- * Provides a highly optimized image compression strategy.
- * Detects if the browser supports WebP encoding via Canvas.
- * - If supported (Chrome/Android/PC): Uses WebP at 0.75 quality (~55% reduction).
- * - If not supported (Safari/iOS): Falls back to JPEG at 0.75 quality (~25% reduction).
+ * Preserve lecture text with high-quality WebP, or JPEG where unavailable.
  */
 
 let _webpSupportCache: boolean | null = null;
@@ -35,14 +32,14 @@ function isWebPEncodingSupported(): boolean {
  * Safely handles iOS WebP-to-PNG fallback bugs.
  */
 export function compressImage(canvas: HTMLCanvasElement): string {
-  const quality = 0.75;
+  const quality = 0.92;
   
   if (isWebPEncodingSupported()) {
-    // Highest compression, safe to use WebP
+    // Keep text edges readable while retaining browser-supported compression.
     return canvas.toDataURL('image/webp', quality);
   } else {
     // iOS Safari / App Store WebView fallback
-    // Prevents massive PNG inflations, saves ~25% over 0.92 JPEG
+    // Avoid the implicit PNG fallback on unsupported browsers.
     return canvas.toDataURL('image/jpeg', quality);
   }
 }

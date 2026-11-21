@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../hooks/useAuth';
 import { auth } from '../utils/firebase';
 import { captureIntents } from '../utils/mediaStorage';
-import { CloudCatalog } from '../services/drive/cloudCatalog';
+import { CloudCatalog, CatalogError } from '../services/drive/cloudCatalog';
+import { nextSyncDelay, retrySyncDelay, syncIsHidden } from '../services/drive/syncPolicy';
 import { enqueueCaptures, uploadCapture } from '../services/drive/captureUpload';
 import { IndexedDbUploadJobStore, UploadQueue, type UploadJob } from '../services/drive/uploadQueue';
 import type { DriveConnection } from '../services/drive/types';
@@ -45,6 +46,7 @@ function DriveSyncSession({ children, user }: { children: ReactNode; user: NonNu
   useEffect(() => {
     const store = new IndexedDbUploadJobStore();
     let alive = true, running = false, again = false, retryRequested = false;
+    let nextRun = 0, failures = 0;
     let active: AbortController | undefined;
     const update = (value: Partial<SyncState>) => { if (alive) setState(prev => ({ ...prev, ...value })); };
     const pulse = (retry = false) => {
@@ -57,7 +59,7 @@ function DriveSyncSession({ children, user }: { children: ReactNode; user: NonNu
       const work = async () => {
         const intents = await captureIntents(user.uid);
         update({ waiting: intents.filter(item => !item.connectionId).length });
-        if (!navigator.onLine) { update({ busy: false, error: '오프라인 · 사진은 기기에 보관됩니다.' }); return; }
+        if (!navigator.onLine) { update({ busy: false, error: '오프라인 · 사진과 저장된 녹음은 기기에 보관됩니다.' }); return; }
         update({ error: '' });
         const connection = await catalog.status(signal);
         signal.throwIfAborted(); update({ connection });
@@ -85,15 +87,22 @@ function DriveSyncSession({ children, user }: { children: ReactNode; user: NonNu
               if (alive && !signal.aborted) setState(prev => ({ ...prev,
                 jobs: prev.jobs.map(item => item.fileId === progress.fileId ? progress : item) }));
             });
-          } catch { if (signal.aborted) break; /* Durable job carries a safe categorized error. */ }
+          } catch (e) {
+            if (signal.aborted) break;
+            if (e instanceof CatalogError && e.httpStatus === 429) throw e;
+            /* Durable job carries a safe categorized error. */
+          }
           await refresh();
         }
       };
       const locked = navigator.locks
         ? navigator.locks.request(`lecturebag-capture-sync:${user.uid}`, { ifAvailable: true }, lock => lock ? work() : Promise.resolve())
         : work();
-      void locked.catch(() => {
-        if (!signal.aborted) update({ error: 'Drive 상태를 확인하지 못했습니다. 기기 원본을 보관하고 다시 시도합니다.' });
+      void locked.then(() => {
+        failures = 0; nextRun = Date.now() + nextSyncDelay(syncIsHidden());
+      }).catch(e => {
+        failures++; nextRun = Date.now() + retrySyncDelay(failures, e instanceof CatalogError ? e.retryAt : undefined);
+        if (!signal.aborted) update({ error: e instanceof CatalogError ? e.message : 'Drive 상태를 확인하지 못했습니다. 기기 원본을 보관하고 다시 시도합니다.' });
       }).finally(() => {
         running = false; update({ busy: false });
         if (again && alive) { again = false; pulse(); }
@@ -111,13 +120,15 @@ function DriveSyncSession({ children, user }: { children: ReactNode; user: NonNu
     if (channel) channel.onmessage = event => changed(event.data);
     window.addEventListener(EVENT, onChanged);
     window.addEventListener('online', online);
+    window.addEventListener('lecturebag-desktop-wake', online);
     document.addEventListener('visibilitychange', visible);
-    const interval = window.setInterval(() => pulse(), 30_000);
+    const interval = window.setInterval(() => { if (!running && Date.now() >= nextRun) pulse(); }, 5000);
     pulse();
     return () => {
       alive = false; active?.abort(); run.current = () => {};
       window.clearInterval(interval); channel?.close();
       window.removeEventListener(EVENT, onChanged); window.removeEventListener('online', online);
+      window.removeEventListener('lecturebag-desktop-wake', online);
       document.removeEventListener('visibilitychange', visible);
     };
   }, [catalog, user.uid]);

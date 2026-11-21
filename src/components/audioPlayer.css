@@ -1,0 +1,30 @@
+.lecturebag-audio-seek {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin: 10px 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.lecturebag-audio-seek::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #262626;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px #0003;
+}
+.lecturebag-audio-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #262626;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px #0003;
+}
+.lecturebag-audio-seek:focus-visible { outline: 2px solid #525252; outline-offset: 6px; }
+.lecturebag-audio-seek:disabled { cursor: default; opacity: .4; }

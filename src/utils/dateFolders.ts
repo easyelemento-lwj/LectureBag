@@ -113,17 +113,21 @@ export function getSampleMediaFiles(capturedPhotos: CapturedPhoto[], recordings:
 
   const convertedRecordings: MediaFile[] = recordings.map((r) => {
     const baseName = formatFileName(r.timestamp);
-    // Legacy support for older names
+    const mime = /^data:([^;,]+)/.exec(r.dataUrl || '')?.[1];
+    const extension = ({ 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' } as Record<string, string>)[mime || '']
+      || /\.(webm|m4a|mp3|ogg|wav)$/i.exec(r.name || '')?.[1] || 'm4a';
+    // Keep source bytes when adapting recordings into explorer files.
     const resolvedName = r.name && r.name.match(/^\d{8}_\d+/) 
-      ? getUniqueName(r.name.replace(/\.m4a$/, ''), 'm4a') 
-      : getUniqueName(baseName, 'm4a');
+      ? getUniqueName(r.name.replace(/\.(webm|m4a|mp3|ogg|wav)$/i, ''), extension)
+      : getUniqueName(baseName, extension);
       
     return {
       id: r.id,
       type: 'audio',
       name: resolvedName,
       duration: r.duration,
-      fileSize: r.size || '12.4 MB',
+      fileSize: r.dataUrl ? dataUrlFileSize(r.dataUrl) : r.size || '원본 없음',
+      dataUrl: r.dataUrl,
       timestamp: r.timestamp,
       mode: '강의 녹음',
     };
@@ -308,4 +312,3 @@ export function extractSmartFileDate(file: File, dataUrl?: string): Date {
 
   return new Date();
 }
-

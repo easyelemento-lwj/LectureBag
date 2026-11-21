@@ -1,8 +1,12 @@
+import { isNativeAndroid } from './services/native';
 import { getAppCapabilities, prewarmCapture } from './utils/appCapabilities';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { desktopBridge } from './services/desktop';
+
+desktopBridge()?.onWake(() => window.dispatchEvent(new Event('lecturebag-desktop-wake')));
 
 // Credentials from older versions must not survive logout or a shared-browser login.
 try { localStorage.removeItem('lecture_snap_gemini_api_key'); } catch { /* Storage may be disabled. */ }
@@ -15,7 +19,8 @@ declare global {
   }
 }
 
-window.__prewarmedCameraStream = prewarmCapture(getAppCapabilities().canCapture, navigator.mediaDevices);
+window.__prewarmedCameraStream = isNativeAndroid() || location.hash === '#admin'
+  ? null : prewarmCapture(getAppCapabilities().canCapture, navigator.mediaDevices);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

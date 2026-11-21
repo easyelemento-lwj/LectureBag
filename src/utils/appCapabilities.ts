@@ -1,3 +1,5 @@
+import { openCamera } from './cameraQuality';
+import { RECORDING_ENABLED } from './featureFlags';
 /** Product capabilities are independent of viewport size and installed-web-app mode. */
 export interface AppEnvironment {
   userAgent: string;
@@ -27,11 +29,9 @@ export function prewarmCapture(
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>,
 ): Promise<MediaStream> | null {
   if (!canCapture || !mediaDevices?.getUserMedia) return null;
-  const camera = mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-    audio: false,
-  });
+  const camera = openCamera(mediaDevices, 'environment');
   const microphone = async () => {
+    if (!RECORDING_ENABLED) return;
     try {
       const stream = await mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => track.stop());
