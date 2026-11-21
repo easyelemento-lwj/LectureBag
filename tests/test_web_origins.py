@@ -43,3 +43,16 @@ def test_preflight_allows_only_the_configured_preview(monkeypatch):
                 assert result.headers.get('access-control-allow-origin') == (origin if accepted else None)
                 assert 'access-control-allow-credentials' not in result.headers
     asyncio.run(check())
+
+
+def test_android_origin_requires_explicit_enablement(monkeypatch):
+    monkeypatch.setenv('DRIVE_WEB_ORIGINS', '')
+    monkeypatch.delenv('ANDROID_ENABLED', raising=False)
+    monkeypatch.delenv('ANDROID_OAUTH_READY', raising=False)
+    assert 'https://localhost' not in drive_web_origins()
+    monkeypatch.setenv('ANDROID_ENABLED', 'true')
+    assert 'https://localhost' not in drive_web_origins()
+    monkeypatch.setenv('ANDROID_OAUTH_READY', 'true')
+    assert 'https://localhost' in drive_web_origins()
+    assert 'https://localhost' in cors_allowed_origins()
+    assert 'http://localhost' not in drive_web_origins()

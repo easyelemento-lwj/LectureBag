@@ -10,6 +10,8 @@ DEFAULT_ORIGINS = (
 
 def drive_web_origins():
     allowed = set()
+    if os.environ.get('ANDROID_ENABLED') == 'true' and os.environ.get('ANDROID_OAUTH_READY') == 'true':
+        allowed.add('https://localhost')
     for value in os.environ.get('DRIVE_WEB_ORIGINS', '').split(','):
         origin = value.strip()
         try:

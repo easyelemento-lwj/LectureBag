@@ -90,7 +90,9 @@ class GoogleDrive:
         token = await google_request('POST', 'https://oauth2.googleapis.com/token', oauth_token_exchange=True, data={
             'code': code, 'client_id': client_id,
             'client_secret': os.environ['GOOGLE_DRIVE_CLIENT_SECRET'],
-            'redirect_uri': origin, 'grant_type': 'authorization_code',
+            'redirect_uri': '' if (origin == 'https://localhost' and os.environ.get('ANDROID_ENABLED') == 'true'
+                                   and os.environ.get('ANDROID_OAUTH_READY') == 'true') else origin,
+            'grant_type': 'authorization_code',
         })
         if DRIVE_SCOPE not in token.get('scope', '').split() or not token.get('access_token'):
             raise failure(403, 'DRIVE_SCOPE_REQUIRED')

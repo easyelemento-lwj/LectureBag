@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LectureBag</string>
+    <string name="title_activity_main">LectureBag</string>
+    <string name="package_name">com.lecturebag.app</string>
+    <string name="custom_url_scheme">com.lecturebag.app</string>
+</resources>
