@@ -154,7 +154,8 @@ function DriveConnectionSession({ user, onOpen, management = !onOpen, children }
           {pc.available && <button type="button" disabled={pc.busy || !pc.library} onClick={pc.library?.enabled ? pc.pause : pc.start} className="min-h-11 rounded-full bg-[#EFEFEF] px-4 text-xs text-neutral-700 enabled:hover:bg-[#E2E2E2] enabled:active:bg-[#E2E2E2] enabled:active:scale-90 transition-[background-color,transform] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500 disabled:opacity-50">{pc.library?.enabled ? '자동 보관 일시정지' : '자동 보관 다시 시작'}</button>}
     </div>}
     {management && <div className="mt-4 border-t border-neutral-100 pt-1"><LastChecked checkedAt={lifecycle.state?.checkedAt} plain /></div>}
-    {management && pausedPurges > 0 && <p role="status" className="mt-4 rounded-2xl bg-amber-50 p-4 text-xs text-amber-800">완전 삭제 요청 {pausedPurges}개가 일시 보류되어 있습니다. 해당 파일을 자동으로 영구 삭제하지 않으며 다른 동기화는 계속합니다.</p>}
+    {management && pausedPurges > 0 && <p role="status" className="mt-4 rounded-2xl bg-amber-50 p-4 text-xs text-amber-800">완전 삭제 요청 {pausedPurges}개가 일시 보류되어 있습니다. 자동으로 영구 삭제하지 않으며 다른 동기화는 계속합니다. 파일 탐색기에서 동기화 상태를 열고 대기 작업을 중단할 수 있습니다.</p>}
+    {management && !connection?.connected && <p className="mt-3 text-xs leading-relaxed text-neutral-500">기존 보관함을 다시 열려면 이전에 연결했던 Google 계정을 선택해 주세요. 다른 계정은 기존 보관함과 연결되지 않을 수 있습니다.</p>}
     {warning && <div className="mt-4 rounded-2xl bg-neutral-50 p-4">
       <p className={'flex items-center gap-2 text-xs font-medium ' + (failed ? 'text-red-700' : 'text-amber-700')}><AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
         {error || syncActionMessage(combinedError, currentJobs.map(job => job.state), connection?.connected === false).replace('Google Drive 버블에서 ', '')}</p>

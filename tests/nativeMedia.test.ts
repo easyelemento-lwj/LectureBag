@@ -63,3 +63,36 @@ test('foreign account journal is rejected before reading or acknowledging its so
     acknowledge: async () => { assert.fail('foreign original must not be deleted'); },
   }), /계정/);
 });
+
+test('Android photo trash metadata without source retains the native original', async () => {
+  const uid=crypto.randomUUID(), id=crypto.randomUUID();
+  const file={uid,id,uri:'file:///native/photo.jpg',startedAt:new Date().toISOString(),width:1,height:1};
+  await set(`lecture_snap_trash_${uid}`, [{file:{id,type:'photo',name:'photo'},deletedAt:new Date().toISOString()}]);
+  let acknowledged=0, reads=0;
+  const result=await importNativeMedia(uid,[file],[],()=>true,{read:async()=>{reads++;return new Blob(['photo']);},dataUrl,
+    acknowledge:async()=>{acknowledged++;}});
+  assert.equal(reads,0); assert.equal(acknowledged,0); assert.equal(result?.photoIssues,1);
+});
+
+test('an unreadable Android photo does not block later photos or delete the failed source', async () => {
+  const uid=crypto.randomUUID();
+  const first={uid,id:crypto.randomUUID(),uri:'file:///broken.jpg',startedAt:new Date().toISOString(),width:1,height:1};
+  const second={uid,id:crypto.randomUUID(),uri:'file:///valid.jpg',startedAt:new Date().toISOString(),width:1,height:1};
+  const acknowledged:string[]=[];
+  const result=await importNativeMedia(uid,[first,second],[],()=>true,{
+    read:async uri=>{if(uri===first.uri) throw Error('failed'); return new Blob(['valid']);},dataUrl,
+    acknowledge:async({id})=>{acknowledged.push(id);}
+  });
+  assert.deepEqual(acknowledged,[second.id]); assert.equal(result?.photoIssues,1);
+  assert.deepEqual(result?.photos.map(photo=>photo.id),[second.id]);
+});
+
+test('Android original is retained if an existing local copy has different bytes', async () => {
+  const uid=crypto.randomUUID(), id=crypto.randomUUID();
+  const file={uid,id,uri:'file:///native/photo.jpg',startedAt:new Date().toISOString(),width:1,height:1};
+  await set(`lecture_snap_photos_${uid}`,[{id,dataUrl:'data:image/jpeg;base64,eA==',timestamp:file.startedAt,mode:'',width:1,height:1}]);
+  let acknowledged=0;
+  const result=await importNativeMedia(uid,[file],[],()=>true,{read:async()=>new Blob(['different']),dataUrl,
+    acknowledge:async()=>{acknowledged++;}});
+  assert.equal(acknowledged,0); assert.equal(result?.photoIssues,1);
+});

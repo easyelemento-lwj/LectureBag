@@ -70,7 +70,7 @@ test('saved recheck unlocks ordinary recovery without enrolling/uploads; account
     captureAudit: async (_: string, ids: string[]) => ({ files: ids.map(fileId => ({ fileId, status: 'missing' })) }),
   } as unknown as CloudCatalog;
   const signal = new AbortController().signal;
-  const deps = { jobs: async () => [], exists: async () => false };
+  const deps = { includeRecordings: true, jobs: async () => [], exists: async () => false };
   const first = await inspectPhotoRecovery(identity, catalog, signal, deps);
   assert.equal(first.rows[0].audioCheck?.description, '검사 기록 없음');
   const check = await recheckAudioRecovery(identity, audio.id, catalog, signal, async recording => compareRecordingDuration(recording.durationMs!, 20000));

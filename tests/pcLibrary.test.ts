@@ -232,3 +232,12 @@ test('interrupted PC transfer resumes committed ranges after store reopen and ve
     assert.equal(await sha256((await reopened.read(file))!), file.checksum);
   } finally { globalThis.fetch = previous; }
 });
+
+test('same-size corrupted PC copy is not returned and becomes pending again', async () => {
+  const f=await fixture(); await f.store.commit(f.state,f.file,f.blob);
+  const { createStore, set } = await import('idb-keyval');
+  const { downloadKey } = await import('../src/services/drive/downloadCache');
+  await set(JSON.stringify(['blob',downloadKey(f.file)]),new Blob(['x'.repeat(f.blob.size)],{type:f.blob.type}),createStore('lecturebag-pc-library','library'));
+  assert.equal(await f.store.read(f.file),undefined);
+  assert.equal((await f.store.state(f.uid))?.saved[f.file.id],undefined);
+});

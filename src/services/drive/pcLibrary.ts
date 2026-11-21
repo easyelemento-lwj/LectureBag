@@ -131,8 +131,9 @@ export class PcLibraryStore {
     if (file.deletedAt || file.purgedAt || file.driveUnavailable || !s || s.blocked || s.connection.connectionId !== file.connectionId || s.unavailable.includes(file.id) ||
       s.saved[file.id] !== downloadKey(file) || !s.files.some(f => f.id === file.id && downloadKey(f) === downloadKey(file))) return;
     const blob = await get<Blob>(blobKey(file), this.db);
-    if (!blob || blob.size !== file.sizeBytes) {
-      // An individually missing/corrupt-sized copy must become pending again.
+    if (!blob || blob.size !== file.sizeBytes || file.checksumAlgorithm !== 'sha256' || await sha256(blob) !== file.checksum) {
+      // Keep the unverified bytes, but do not show them as a verified original.
+      // Clearing the receipt makes the next sync download a fresh copy.
       await this.change(file.ownerUid, current => {
         if (!current) throw new Error('PC 보관소 없음');
         const saved = { ...current.saved };

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../hooks/useAuth';
 import { auth } from '../utils/firebase';
 import { captureIntents } from '../utils/mediaStorage';
+import { RECORDING_ENABLED } from '../utils/featureFlags';
 import { CloudCatalog, CatalogError } from '../services/drive/cloudCatalog';
 import { nextSyncDelay, retrySyncDelay, syncIsHidden } from '../services/drive/syncPolicy';
 import { enqueueCaptures, uploadCapture } from '../services/drive/captureUpload';
@@ -67,18 +68,19 @@ function DriveSyncSession({ children, user }: { children: ReactNode; user: NonNu
         const identity = { ownerUid: user.uid, connectionId: connection.connectionId };
         const queue = new UploadQueue(store, identity);
         const shouldRetry = retryRequested; retryRequested = false;
-        await enqueueCaptures(identity, queue);
+        const intakeIssues = await enqueueCaptures(identity, queue);
+        if (intakeIssues.length) update({ error: `업로드할 수 없는 사진 ${intakeIssues.length}개: ${intakeIssues.map(item => `${item.name} (${item.message})`).join('; ')}` });
         signal.throwIfAborted();
         const refresh = async () => {
-          const jobs = await queue.list();
+          const jobs = (await queue.list()).filter(job => RECORDING_ENABLED || job.mimeType.startsWith('image/'));
           signal.throwIfAborted();
           update({ jobs, waiting: 0, previousConnection: intents.filter(item => item.connectionId && item.connectionId !== identity.connectionId).length });
         };
-        for (const job of await queue.list()) {
+        for (const job of (await queue.list()).filter(item => RECORDING_ENABLED || item.mimeType.startsWith('image/'))) {
           if (job.state === 'offline' || (shouldRetry && ['needs_auth', 'quota_full', 'paused', 'failed'].includes(job.state))) await queue.resume(job.fileId);
         }
         await refresh();
-        const candidates = (await queue.list()).filter(job => ['queued', 'uploading', 'verifying', 'registering', 'retry_wait'].includes(job.state)
+        const candidates = (await queue.list()).filter(job => (RECORDING_ENABLED || job.mimeType.startsWith('image/')) && ['queued', 'uploading', 'verifying', 'registering', 'retry_wait'].includes(job.state)
           && (job.retryAt || 0) <= Date.now() && (job.lease?.expiresAt || 0) <= Date.now()).slice(0, 3);
         for (const job of candidates) {
           signal.throwIfAborted(); update({ busy: true });
@@ -94,6 +96,12 @@ function DriveSyncSession({ children, user }: { children: ReactNode; user: NonNu
           }
           await refresh();
         }
+        // Continue draining ready work without waiting for the next background
+        // polling interval. Per-request pacing and retry backoff still apply.
+        if (!signal.aborted && (await queue.list()).some(job =>
+          (RECORDING_ENABLED || job.mimeType.startsWith('image/')) &&
+          ['queued', 'uploading', 'verifying', 'registering', 'retry_wait'].includes(job.state) &&
+          (job.retryAt || 0) <= Date.now() && (job.lease?.expiresAt || 0) <= Date.now())) again = true;
       };
       const locked = navigator.locks
         ? navigator.locks.request(`lecturebag-capture-sync:${user.uid}`, { ifAvailable: true }, lock => lock ? work() : Promise.resolve())

@@ -50,7 +50,7 @@ export function DrivePhotoTrial({ catalog, uid, connectionId }: { catalog: Cloud
   }
   return <div className="border-t pt-4 space-y-3">
     <p className="text-sm font-bold">사진 한 장 업로드 시험</p>
-    <p className="text-xs text-neutral-500">JPEG·PNG·WebP, 최대 20MB. Drive의 LectureBag / 사진 업로드 시험 폴더에 저장됩니다.</p>
+    <p className="text-xs text-neutral-500">JPEG·PNG·WebP, 최대 100MiB. Drive의 LectureBag / 사진 업로드 시험 폴더에 저장됩니다.</p>
     <input aria-label="시험 사진 선택" type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || !!pending}
       onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void action(() => locked(async () => {
         const photo = await stagePhoto(key, file); setPending(photo.name); setMessage('기기에 보관했습니다. 업로드를 눌러 주세요.');

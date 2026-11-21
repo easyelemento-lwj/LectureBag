@@ -76,6 +76,15 @@ def test_round_trip_images_times_and_mode_and_account_isolation(store):
     assert repo.read('other') == {'revision': 0, 'timetables': [], 'storageMode': 'default'}
 
 
+@pytest.mark.parametrize('mime', ['heic', 'heif', 'gif'])
+def test_recognized_image_formats_survive_timetable_save(store, mime):
+    repo, _ = store
+    original = body()
+    original.timetables[0].image = f'data:image/{mime};base64,AAAA'
+    repo.write('user', original)
+    assert repo.read('user')['timetables'][0]['image'] == original.timetables[0].image
+
+
 def test_retry_after_lost_response_is_idempotent(store):
     repo, _ = store
     original = body()

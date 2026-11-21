@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { RECORDING_ENABLED } from '../utils/featureFlags';
 import { useDriveSync } from '../context/DriveSyncContext';
 import { CloudCatalog } from '../services/drive/cloudCatalog';
 import { inspectPhotoRecovery, repairMissingPhotos, recheckAudioRecovery, type PhotoRecoveryReport, type PhotoRecoveryStatus } from '../services/drive/photoRecovery';
@@ -73,11 +74,11 @@ export function PhotoRecoveryPanel({ identity, catalog }: { identity: DriveIdent
   const missing = report?.rows.filter(row => row.status === 'missing').length || 0;
   const registered = report?.rows.filter(row => row.status === 'registered').length || 0;
   const pending = report?.rows.some(row => row.status === 'pending');
-  return <div className="mt-4 border-t border-neutral-100 pt-4 text-xs text-neutral-500" aria-label="사진·녹음 동기화 복구">
-    <p className="font-medium text-neutral-700">사진·녹음 동기화 점검</p>
-    <p className="mt-1 leading-relaxed">이 기기에서 촬영한 사진과 저장된 녹음을 서버 기록과 비교합니다. 점검만으로 파일을 업로드하거나 삭제하지 않습니다.</p>
+  return <div className="mt-4 border-t border-neutral-100 pt-4 text-xs text-neutral-500" aria-label={RECORDING_ENABLED ? "사진·녹음 동기화 복구" : "사진 동기화 복구"}>
+    <p className="font-medium text-neutral-700">{RECORDING_ENABLED ? '사진·녹음 동기화 점검' : '사진 동기화 점검'}</p>
+    <p className="mt-1 leading-relaxed">{RECORDING_ENABLED ? '이 기기에서 촬영한 사진과 저장된 녹음을' : '이 기기에서 촬영한 사진을'} 서버 기록과 비교합니다. 점검만으로 파일을 업로드하거나 삭제하지 않습니다.</p>
     <div className="mt-3 flex flex-wrap gap-2">
-      <button type="button" className={button} disabled={busy || !sync.enabled} onClick={() => void run()}>{busy ? '확인 중…' : '사진·녹음 동기화 점검'}</button>
+      <button type="button" className={button} disabled={busy || !sync.enabled} onClick={() => void run()}>{busy ? '확인 중…' : RECORDING_ENABLED ? '사진·녹음 동기화 점검' : '사진 동기화 점검'}</button>
       {missing > 0 && <button type="button" className={button} disabled={busy || !sync.enabled} onClick={() => void run(true)}>누락 파일 {missing}개 복구</button>}
       {pending && <button type="button" className={button} disabled={busy || sync.busy} onClick={() => { sync.retry(); setMessage('기존 업로드를 다시 시도합니다. 잠시 후 동기화를 다시 점검해 주세요.'); }}>기존 업로드 다시 시도</button>}
     </div>
@@ -85,8 +86,8 @@ export function PhotoRecoveryPanel({ identity, catalog }: { identity: DriveIdent
     {message && <p role="status" className="mt-3 leading-relaxed">{message}</p>}
     {report && <div className="mt-3 rounded-2xl bg-neutral-50 p-3" role="status">
       <p>기기 파일 {report.rows.length}개 · 서버 등록 {registered}개 · 복구 가능 {missing}개</p>
-      {(['photo', 'audio'] as const).map(kind => <p key={kind} className="mt-1">{kind === 'photo' ? '사진' : '녹음'} {report.rows.filter(row => row.kind === kind).length}개 · 복구 가능 {report.rows.filter(row => row.kind === kind && row.status === 'missing').length}개</p>)}
-      <p className="mt-1 text-[11px]">점검 시각 {new Date(report.checkedAt).toLocaleTimeString('ko-KR')} · 가져온 파일·저장 전 녹음 조각은 제외</p>
+      {(RECORDING_ENABLED ? ['photo', 'audio'] as const : ['photo'] as const).map(kind => <p key={kind} className="mt-1">{kind === 'photo' ? '사진' : '녹음'} {report.rows.filter(row => row.kind === kind).length}개 · 복구 가능 {report.rows.filter(row => row.kind === kind && row.status === 'missing').length}개</p>)}
+      <p className="mt-1 text-[11px]">점검 시각 {new Date(report.checkedAt).toLocaleTimeString('ko-KR')} · 가져온 파일은 제외</p>
       <details className="mt-2"><summary className="cursor-pointer py-2">파일별 점검 결과</summary>
         <ul className="mt-1 max-h-64 space-y-2 overflow-auto">{report.rows.map(row => <li key={row.id} className="break-words border-t border-neutral-200/70 pt-2">
           <p>{row.kind === 'photo' ? '사진' : '녹음'} · {row.name}</p><p className={row.status === 'registered' ? 'text-neutral-500' : 'text-amber-700'}>{labels[row.status]}</p>

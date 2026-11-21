@@ -1,6 +1,8 @@
 import { createStore, get, set, del } from 'idb-keyval';
 import { bindCapture, captureIntents, uploadSource as captureSource } from '../../utils/mediaStorage';
 import { MAX_AUDIO_BYTES, audioExtensions } from './audioFormat';
+import { MAX_PHOTO_BYTES } from './imageLimits';
+import { RECORDING_ENABLED } from '../../utils/featureFlags';
 import { CloudCatalog, CatalogError } from './cloudCatalog';
 import { DriveTransferError } from './driveClient';
 import { sha256, trialClient } from './photoTrial';
@@ -13,26 +15,41 @@ export const folderKey = (path: string[]) => sha256(new Blob([JSON.stringify(pat
 export function captureBlob(dataUrl: string) {
   const match = /^data:((?:image\/(?:jpeg|png|webp))|(?:audio\/(?:webm|mp4|ogg)));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
   if (!match) throw new DriveTransferError('failed');
-  const limit = audioExtensions[match[1]] ? MAX_AUDIO_BYTES : 20 * 1024 * 1024;
+  const limit = audioExtensions[match[1]] ? MAX_AUDIO_BYTES : MAX_PHOTO_BYTES;
   if (match[2].length > Math.ceil(limit / 3) * 4) throw new DriveTransferError('failed');
   const bytes = Uint8Array.from(atob(match[2]), char => char.charCodeAt(0));
   if (!bytes.length || bytes.length > limit) throw new DriveTransferError('failed');
   return new Blob([bytes], { type: match[1] });
 }
 
-export async function enqueueCaptures(identity: DriveIdentity, queue: UploadQueue) {
+export async function enqueueCaptures(identity: DriveIdentity, queue: UploadQueue, includeRecordings = RECORDING_ENABLED) {
   const known = new Set((await queue.list()).map(job => job.fileId));
+  const issues: Array<{ fileId: string; name: string; message: string }> = [];
   for (const intent of await captureIntents(identity.ownerUid)) {
     if (known.has(intent.fileId)) continue;
     if (intent.connectionId && intent.connectionId !== identity.connectionId) continue;
     const source = await captureSource(identity.ownerUid, intent.fileId);
     if (!source) continue;
+    if (!includeRecordings && source.dataUrl?.startsWith('data:audio/')) continue;
+    let blob: Blob;
+    try { blob = captureBlob(source.dataUrl); }
+    catch {
+      issues.push({ fileId: intent.fileId, name: intent.name,
+        message: '원본 형식이나 크기를 확인해 주세요. 사진은 100MiB까지 지원합니다.' });
+      continue;
+    }
     const bound = await bindCapture(identity.ownerUid, intent.fileId, identity.connectionId);
-    const blob = captureBlob(source.dataUrl);
-    await queue.enqueue({ ...identity, fileId: bound.fileId, localFileRef: bound.fileId, name: bound.name,
-      mimeType: blob.type, sizeBytes: blob.size, capturedAt: bound.capturedAt,
-      logicalFolderId: await folderKey(bound.folderPath) });
+    try {
+      await queue.enqueue({ ...identity, fileId: bound.fileId, localFileRef: bound.fileId, name: bound.name,
+        mimeType: blob.type, sizeBytes: blob.size, capturedAt: bound.capturedAt,
+        logicalFolderId: await folderKey(bound.folderPath) });
+    } catch (error) {
+      // A bad item's metadata must not prevent subsequent images from uploading.
+      if (error instanceof DOMException) throw error;
+      issues.push({ fileId: intent.fileId, name: intent.name, message: '사진 정보가 올바르지 않습니다.' });
+    }
   }
+  return issues;
 }
 
 function failureState(error: unknown): 'needs_auth' | 'quota_full' | 'retry_wait' | 'failed' {

@@ -366,7 +366,6 @@ def test_permanent_delete_requires_trash_and_google_success_then_replay_is_harml
             prepared = await client.post('/api/cloud-files/trash/prepare', json={'connectionId': conn['connectionId'], 'operations': [body]})
             assert prepared.status_code == 200
             assert svc.catalog.pending_lifecycle('alice', conn['connectionId'], file['id'])['purge'] is True
-            assert (await client.post('/api/cloud-files/trash/cancel', json=body)).status_code == 409
             result = await client.post('/api/cloud-files/trash', json=body)
             assert result.status_code == 200, result.text
             assert result.json()['purgedAt'] and result.json()['revision'] == 3
@@ -378,6 +377,19 @@ def test_permanent_delete_requires_trash_and_google_success_then_replay_is_harml
             assert observed.json()['files'][0]['purgedAt']
             assert not observed.json()['files'][0].get('driveUnavailable')
             assert (await client.post('/api/cloud-files/trash', json=request(conn, result.json(), False))).status_code == 409
+    asyncio.run(run())
+
+def test_cancel_pending_purge_observes_without_deleting_and_blocks_late_retry(monkeypatch, db):
+    async def run():
+        async with setup(monkeypatch, db) as (client, svc, conn, file):
+            deleted = (await client.post('/api/cloud-files/trash', json=request(conn, file))).json()
+            body = {**request(conn, deleted), 'purge': True, 'purgeConfirmed': True}
+            assert (await client.post('/api/cloud-files/trash/prepare', json={'connectionId': conn['connectionId'], 'operations': [body]})).status_code == 200
+            cancelled = await client.post('/api/cloud-files/trash/cancel', json=body)
+            assert cancelled.status_code == 200 and not cancelled.json().get('purgedAt')
+            assert svc.catalog.pending_lifecycle('alice', conn['connectionId'], file['id']) is None
+            assert (await client.post('/api/cloud-files/trash', json=body)).status_code == 200
+            assert 'drive-original' in svc.google.remote
     asyncio.run(run())
 
 

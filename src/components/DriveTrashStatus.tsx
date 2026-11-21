@@ -31,8 +31,8 @@ export function DriveTrashStatus() {
       <LastChecked checkedAt={life.state?.checkedAt} />
       {warning && <p className="m-0 min-w-0 px-[13px] text-left">{syncActionMessage(error || (unavailable.length ? '원본 접근 확인 필요' : ''), sync.jobs.map(job => job.state), life.connected === false)}</p>}
       {!!operations.length && <details><summary className="min-h-11 cursor-pointer py-3">대기 작업 관리</summary><ul className="space-y-2">{operations.map(op => <li key={op.operationId} className="break-words">
-        {life.files.find(f => f.id === op.fileId)?.name || '자료'} · {op.error ? '다시 시도 필요' : op.purge ? '완전 삭제 중' : op.cancelRequested ? '중단 확인 중' : op.trashed ? '삭제 중' : '복원 중'}
-        {!op.remote && !op.purge && <button type="button" disabled={op.cancelRequested} className="ml-2 min-h-11 underline disabled:opacity-40" onClick={() => {
+        {life.files.find(f => f.id === op.fileId)?.name || '자료'} · {op.cancelRequested ? '중단 확인 중' : op.error ? '다시 시도 필요' : op.purge && !op.purgeConfirmed ? '삭제 확인 필요' : op.purge ? '완전 삭제 중' : op.trashed ? '삭제 중' : '복원 중'}
+        {!op.remote && <button type="button" disabled={op.cancelRequested} className="ml-2 min-h-11 underline disabled:opacity-40" onClick={() => {
           if (window.confirm('아직 완료되지 않은 요청의 추가 시도를 중단합니다. 이미 Drive에 반영된 변경을 되돌리지는 않습니다. 계속할까요?')) life.cancel(op.operationId);
         }}>요청 중단</button>}
       </li>)}</ul></details>}

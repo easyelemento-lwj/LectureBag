@@ -1,6 +1,14 @@
 import type { SemesterTimetable } from '../types';
 
 export type TimetableValue = { timetables: SemesterTimetable[]; storageMode: 'default' | 'timetable' };
+export const describeTimetable = (value: TimetableValue) => [
+  `보관 방식: ${value.storageMode === 'timetable' ? '시간표별' : '기본'}`,
+  ...value.timetables.map(t => {
+    const days = ['일', '월', '화', '수', '목', '금', '토'];
+    const meetings = t.entries.map(entry => `${days[entry.dayOfWeek] || '?'} ${entry.startTime}–${entry.endTime} ${entry.subject}`).join(', ');
+    return `${t.year}년 ${t.semester} · ${t.startDate}~${t.endDate} · ${meetings || '수업 없음'}`;
+  }),
+];
 
 /** Compare content without depending on object-key order or optional undefined fields. */
 function canonical(value: unknown): unknown {

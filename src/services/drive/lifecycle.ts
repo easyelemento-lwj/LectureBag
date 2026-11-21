@@ -70,7 +70,7 @@ export async function syncLifecycle(catalog: CloudCatalog, store: LifecycleStore
   // The worker lock is short lived. Persist its last successful read so another
   // tab does not repeat the same background poll immediately after it releases.
   if (!force && local?.cursor && Date.now() - (local.checkedAt || 0) < SYNC_INTERVAL &&
-    !local.operations.some(op => (!op.purge || op.purgeConfirmed) && (!op.retryAt || op.retryAt <= Date.now()))) return;
+    !local.operations.some(op => (!op.purge || op.purgeConfirmed || op.cancelRequested) && (!op.retryAt || op.retryAt <= Date.now()))) return;
   if (!local?.cursor) {
     const head = await catalog.syncHead(scope.connectionId, signal);
     let cursor: string | undefined, files: CloudMediaRecord[] = [];
@@ -92,7 +92,7 @@ export async function syncLifecycle(catalog: CloudCatalog, store: LifecycleStore
   // still paces every request; do not impose a second 60–300s pause after five.
   // Snapshot IDs bound this pass. Re-read each operation so a cancellation or
   // backoff recorded while earlier requests were running is respected.
-  const readyIds = local.operations.filter(op => (!op.purge || op.purgeConfirmed) && (!op.retryAt || op.retryAt <= Date.now())).map(op => op.operationId);
+  const readyIds = local.operations.filter(op => (!op.purge || op.purgeConfirmed || op.cancelRequested) && (!op.retryAt || op.retryAt <= Date.now())).map(op => op.operationId);
   for (const operationId of readyIds) {
     guard();
     local = await store.read(scope);

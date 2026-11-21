@@ -142,7 +142,7 @@ function Session({ user, children }: { user: NonNullable<ReturnType<typeof useAu
       if (auth.currentUser?.uid !== user.uid) return;
       const scope = stateRef.current;
       if (!scope) return;
-      void store.change(scope, s => ({ ...s, operations: s.operations.map(op => op.operationId === operationId && !op.purge
+      void store.change(scope, s => ({ ...s, operations: s.operations.map(op => op.operationId === operationId
         ? { ...op, cancelRequested: true, retryAt: 0 } : op) })).then(saved => { setState(saved); run.current(true); })
         .catch(() => setError('중단 요청을 기기에 저장하지 못했습니다.'));
     }, refresh: () => {

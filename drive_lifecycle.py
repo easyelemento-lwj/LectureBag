@@ -103,8 +103,10 @@ async def apply_purge(svc, uid, connection, access, file_id, operation_id, revis
     remote = await svc.google.file(access, file['driveFileId'])
     owned_file(uid, connection, file, remote)
     if remote.get('mimeType') == 'application/vnd.google-apps.folder' or remote.get('_catalogContentChanged'):
+        await asyncio.to_thread(svc.catalog.observe_lifecycle, uid, connection, file, remote, op)
         raise failure(409, 'DRIVE_FILE_CONFLICT')
     if not remote['trashed']:
+        await asyncio.to_thread(svc.catalog.observe_lifecycle, uid, connection, file, remote, op)
         raise failure(409, 'DRIVE_FILE_NOT_TRASHED')
     await current_connection(svc, uid, connection)
     await guard()
@@ -112,10 +114,10 @@ async def apply_purge(svc, uid, connection, access, file_id, operation_id, revis
     return await asyncio.to_thread(svc.catalog.finish_purge, uid, connection, file, op)
 
 
-async def cancel_operation(svc, uid, connection, access, file_id, operation_id, revision, trashed, guard):
+async def cancel_operation(svc, uid, connection, access, file_id, operation_id, revision, trashed, guard, purge=False):
     # Create a terminal receipt even if the original request has not arrived yet.
     # Cancellation observes reality; it never issues an inverse Google mutation.
-    op, file = await asyncio.to_thread(svc.catalog.begin_lifecycle, uid, connection, file_id, operation_id, revision, trashed)
+    op, file = await asyncio.to_thread(svc.catalog.begin_lifecycle, uid, connection, file_id, operation_id, revision, trashed, purge)
     if op['done']:
         return file
     try:

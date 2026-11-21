@@ -3,7 +3,7 @@ import type { User } from 'firebase/auth';
 import { get, set } from 'idb-keyval';
 import type { SemesterTimetable } from '../types';
 import { accountKey } from '../utils/accountStorage';
-import { needsInitialChoice, sameTimetable, type TimetableValue } from '../utils/timetableConflict';
+import { describeTimetable, needsInitialChoice, sameTimetable, type TimetableValue } from '../utils/timetableConflict';
 
 type Value = TimetableValue;
 type Snapshot = Value & { revision: number };
@@ -11,10 +11,6 @@ type Cache = { value: Value; revision: number; requestId?: string };
 type Comparison = { local: string[]; server: string[] };
 export type TimetableSync = { message: string; editable: boolean; conflict: boolean; comparison?: Comparison; retry: () => void; useServer: () => void; useLocal: () => void; downloadVersions: () => void };
 const empty: Value = { timetables: [], storageMode: 'default' };
-const describe = (value: Value) => value.timetables.map(t => {
-  const subjects = [...new Set(t.entries.map(entry => entry.subject))].join(', ');
-  return `${t.year}년 ${t.semester} · 수업 ${t.entries.length}개${subjects ? ` (${subjects})` : ''}`;
-});
 
 async function request(user: User, body?: unknown): Promise<Snapshot> {
   const controller = new AbortController();
@@ -59,7 +55,7 @@ export function useAccountTimetable(user: User | null, mobile: boolean) {
     const markConflict = (remote?: Snapshot) => {
       conflict = true; remoteConflict = remote;
       show('이 기기와 계정의 시간표가 다릅니다. 자동 변경을 멈췄습니다. 사용할 시간표를 선택해 주세요.', false, true,
-        remote ? { local: describe(cache.value), server: describe(remote) } : undefined);
+        remote ? { local: describeTimetable(cache.value), server: describeTimetable(remote) } : undefined);
     };
     const backup = async (value: Value, reason: string) => {
       // Account-scoped recovery snapshots are retained if the user switches versions.
@@ -119,7 +115,10 @@ export function useAccountTimetable(user: User | null, mobile: boolean) {
           let latest: Snapshot | undefined;
           try { latest = await request(currentUser); } catch { /* both versions remain untouched */ }
           if (alive) markConflict(latest);
-        } else show('시간표를 동기화하지 못했습니다. 기기의 시간표는 유지됩니다. 다시 시도해 주세요.');
+        } else {
+          const detail = error instanceof Error ? error.message : '';
+          show(`${detail || '시간표를 동기화하지 못했습니다.'} 기기의 시간표는 유지됩니다. 다시 확인해 주세요.`);
+        }
       } finally { busy = false; }
     }
     actions.current = {
@@ -162,7 +161,7 @@ export function useAccountTimetable(user: User | null, mobile: boolean) {
           if (!alive) return;
           if ((error as { status?: number }).status === 409) { let latest: Snapshot | undefined; try { latest = await request(currentUser); } catch {} markConflict(latest); }
           else { conflict = true; show('시간표를 저장하지 못했습니다. 두 시간표는 유지됩니다. 다시 선택해 주세요.', false, true,
-            remoteConflict ? { local: describe(cache.value), server: describe(remoteConflict) } : undefined); }
+            remoteConflict ? { local: describeTimetable(cache.value), server: describeTimetable(remoteConflict) } : undefined); }
         } finally { busy = false; }
       })(); },
     };

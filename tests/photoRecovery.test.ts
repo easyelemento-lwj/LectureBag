@@ -23,7 +23,7 @@ function fixture() {
   } as unknown as CloudCatalog;
   let jobs: UploadJob[] = [];
   const existing = new Set<string>();
-  const deps = { jobs: async () => jobs, exists: async (id: string) => existing.has(id) };
+  const deps = { includeRecordings: true, jobs: async () => jobs, exists: async (id: string) => existing.has(id) };
   return { identity, catalog, remote, deps, existing, job: (job: Partial<UploadJob>) => { jobs.push({ ...identity, ...job } as UploadJob); },
     invalidate: () => { valid = false; }, changeConnection: () => { revision++; } };
 }
@@ -177,4 +177,21 @@ test('Drive orphan search includes trash and previous connections; incomplete se
     incomplete = true;
     await assert.rejects(client.captureExists(crypto.randomUUID(), 'a'.repeat(64)));
   } finally { globalThis.fetch = original; }
+});
+
+
+test('when recording is disabled, photo audit and repair never enqueue old recordings', async () => {
+  const f = fixture(), p = photo(); f.deps.includeRecordings = false;
+  await saveCapturedPhoto(f.identity.ownerUid, p);
+  const audio: RecordedAudio = { id: crypto.randomUUID(), name: 'old.m4a', duration: '00:01',
+    timestamp: '2026-10-31T10:00:00Z', integrity: { status: 'duration_checked' }, dataUrl: 'data:audio/mp4;base64,YQ==' };
+  await saveRecordedAudio(f.identity.ownerUid, audio);
+  const report = await inspectPhotoRecovery(f.identity, f.catalog, signal(), f.deps);
+  assert.deepEqual(report.rows.map(row => row.id), [p.id]);
+  const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
+  try {
+    assert.equal((await repairMissingPhotos(f.identity, [p.id, audio.id], f.catalog, signal(), f.deps)).count, 1);
+    assert.deepEqual((await captureIntents(f.identity.ownerUid)).map(intent => intent.fileId), [p.id]);
+  } finally { if (oldStorage) Object.defineProperty(globalThis, 'localStorage', oldStorage); else delete (globalThis as any).localStorage; }
 });

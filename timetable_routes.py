@@ -42,7 +42,8 @@ def encode_snapshot(body):
     data = {'timetables': [t.model_dump(exclude_none=True) for t in body.timetables], 'storageMode': body.storageMode}
     for timetable in data['timetables']:
         image = timetable.get('image')
-        if image and not image.startswith(('data:image/jpeg;base64,', 'data:image/png;base64,', 'data:image/webp;base64,')):
+        if image and not image.startswith(('data:image/jpeg;base64,', 'data:image/png;base64,', 'data:image/webp;base64,',
+                                           'data:image/heic;base64,', 'data:image/heif;base64,', 'data:image/gif;base64,')):
             raise HTTPException(422, '시간표 사진을 다시 등록해 주세요.')
     encoded = json.dumps(data, ensure_ascii=True, separators=(',', ':'))
     if len(encoded) > 6_000_000:

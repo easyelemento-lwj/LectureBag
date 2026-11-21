@@ -379,14 +379,12 @@ def create_drive_router(verify_user, firebase_app):
     @router.post('/cloud-files/trash/cancel')
     async def cancel_trash(body: TrashRequest, request: Request, context=Depends(deps)):
         configured_origin(request)
-        if body.purge:
-            raise failure(409, 'DRIVE_PURGE_CANNOT_CANCEL')
         uid, svc = context
         current = await sync_connection(uid, svc, body.connectionId)
         async with file_lease(svc, uid, str(body.connectionId), str(body.fileId)) as guard:
             access = await lifecycle_access(uid, svc, current)
             result = await cancel_operation(svc, uid, current, access, str(body.fileId), str(body.operationId),
-                                            body.revision, body.trashed, guard)
+                                            body.revision, body.trashed, guard, body.purge)
         await publish_change(uid, str(body.connectionId))
         return result
 

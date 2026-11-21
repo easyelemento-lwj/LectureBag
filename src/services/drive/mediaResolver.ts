@@ -1,5 +1,6 @@
 import { uploadSource as captureSource } from '../../utils/mediaStorage';
 import { MAX_AUDIO_BYTES, audioExtensions } from './audioFormat';
+import { MAX_PHOTO_BYTES } from './imageLimits';
 import { captureBlob } from './captureUpload';
 import { checkConnection } from './cloudBrowser';
 import type { CloudCatalog } from './cloudCatalog';
@@ -10,7 +11,7 @@ import type { CloudMediaRecord, DriveIdentity } from './types';
 
 export function supportedPhoto(file: CloudMediaRecord) {
   return file.kind === 'photo' && ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimeType) &&
-    Number.isSafeInteger(file.sizeBytes) && file.sizeBytes > 0 && file.sizeBytes <= 20 * 1024 * 1024 &&
+    Number.isSafeInteger(file.sizeBytes) && file.sizeBytes > 0 && file.sizeBytes <= MAX_PHOTO_BYTES &&
     file.checksumAlgorithm === 'sha256' && /^[a-f0-9]{64}$/.test(file.checksum || '') &&
     Number.isSafeInteger(file.revision) && file.revision > 0;
 }

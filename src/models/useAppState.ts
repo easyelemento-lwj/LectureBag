@@ -248,13 +248,14 @@ export function useAppState(canCapture: boolean) {
       if (!stillOwner()) return;
       setIsRecording(!!status.active); setIsPaused(status.active?.state === 'paused');
       setRecordingSeconds(Math.floor((status.active?.elapsedMs ?? 0) / 1000));
-      if (!captureSaving.current && (status.finished.length || status.photos.length)) {
-        captureSaving.current = true; setRecordingSaving(status.finished.length > 0);
+      const finishedRecordings = RECORDING_ENABLED ? status.finished : [];
+      if (!captureSaving.current && (finishedRecordings.length || status.photos.length)) {
+        captureSaving.current = true; setRecordingSaving(finishedRecordings.length > 0);
         try {
-          const saved = await importNativeMedia(owner, status.photos, status.finished, stillOwner);
-          if (saved && stillOwner()) { setPhotos(saved.photos); setRecordings(saved.recordings); setCaptureError(''); driveSync.wake(); }
+          const saved = await importNativeMedia(owner, status.photos, finishedRecordings, stillOwner);
+          if (saved && stillOwner()) { setPhotos(saved.photos); setRecordings(saved.recordings); setCaptureError(saved.photoIssues ? `사진 ${saved.photoIssues}개의 기기 원본을 확인하지 못해 보존했습니다. 저장 공간과 휴지통을 확인해 주세요.` : ''); driveSync.wake(); }
         } finally { captureSaving.current = false; if (stillOwner()) setRecordingSaving(false); }
-      } else if (!status.active && !status.finished.length) setRecordingSaving(false);
+      } else if (!status.active && !finishedRecordings.length) setRecordingSaving(false);
     } catch { if (stillOwner()) setCaptureError('기기 원본 저장을 완료하지 못했습니다. 원본은 보존되며 다시 확인합니다.'); }
     finally { nativeRefreshing.current = false; }
   };

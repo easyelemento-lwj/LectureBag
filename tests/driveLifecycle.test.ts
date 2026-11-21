@@ -56,6 +56,18 @@ test('legacy permanent deletion remains pending without being sent', async () =>
   assert.equal((await f.store.read(f.scope))!.operations.length, 1);
 });
 
+test('a user can cancel a legacy unconfirmed purge without sending a delete', async () => {
+  const f = fixture(); await seed(f);
+  const deleted = { ...f.file, deletedAt: '2026-11-02', revision: 2 };
+  const operationId = crypto.randomUUID();
+  await f.store.change(f.scope, s => ({ ...s, files: [deleted], operations: [{ operationId, fileId: deleted.id, revision: 2, trashed: true, purge: true, cancelRequested: true }] }));
+  const catalog = { assertOwner() {}, trash: async () => { throw Error('must not delete'); },
+    cancelTrash: async (body: any) => { assert.equal(body.operationId, operationId); assert.equal(body.purge, true); return deleted; },
+    changes: async () => ({ cursor: 'one', sequence: 1, hasMore: false, changes: [] }) } as unknown as CloudCatalog;
+  await syncLifecycle(catalog, f.store, f.scope, new AbortController().signal, async () => {}, true);
+  assert.equal((await f.store.read(f.scope))!.operations.length, 0);
+});
+
 test('nine ready deletions drain in one pass before background reads, with per-file progress', async () => {
   const f = fixture(); await seed(f);
   const files = Array.from({ length: 9 }, () => ({ ...f.file, id: crypto.randomUUID() }));

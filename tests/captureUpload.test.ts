@@ -19,7 +19,7 @@ async function fixture(bytes = 'synthetic camera photo', mime = 'image/webp') {
   const queue = new UploadQueue(new IndexedDbUploadJobStore(), identity, () => time);
   if (mime.startsWith('audio/')) await saveRecordedAudio(identity.ownerUid, { ...photo, name: 'recording', duration: '01:00' }, intent);
   else await saveCapturedPhoto(identity.ownerUid, photo, intent);
-  await enqueueCaptures(identity, queue);
+  await enqueueCaptures(identity, queue, mime.startsWith('audio/'));
   return { identity, photo, intent, queue, tick: () => { time += 301_000; } };
 }
 
@@ -218,4 +218,19 @@ test('checksum mismatch and changed connection cannot register a photo', async (
       assert.ok(await captureSource(f.identity.ownerUid, f.photo.id));
     } finally { remote.restore(); }
   }
+});
+
+test('one invalid photo does not prevent later photos from being queued', async () => {
+  const identity={ownerUid:crypto.randomUUID(),connectionId:crypto.randomUUID()};
+  const queue=new UploadQueue(new IndexedDbUploadJobStore(),identity);
+  const ids:string[]=[];
+  for (const [dataUrl,name] of [['data:image/jpeg;base64,','broken.jpg'],['data:image/jpeg;base64,YQ==','good.jpg']]) {
+    const id=crypto.randomUUID(), timestamp='2026-11-01T00:00:00Z'; ids.push(id);
+    await saveCapturedPhoto(identity.ownerUid,{id,dataUrl,timestamp,mode:'',width:1,height:1},
+      {fileId:id,name,capturedAt:timestamp,connectionId:identity.connectionId,folderPath:['2026']});
+  }
+  const issues=await enqueueCaptures(identity,queue);
+  assert.deepEqual(issues.map(issue=>issue.fileId),[ids[0]]);
+  assert.deepEqual((await queue.list()).map(job=>job.fileId),[ids[1]]);
+  assert.ok(await captureSource(identity.ownerUid,ids[0]));
 });

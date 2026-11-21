@@ -1,4 +1,5 @@
 import { get } from 'idb-keyval';
+import { RECORDING_ENABLED } from '../../utils/featureFlags';
 import { photoRecoverySnapshot, recoverCaptureIntents, saveRecordingRecheck } from '../../utils/mediaStorage';
 import { recordingCheckDescription, recheckRecordingLength } from '../../utils/recordingRecheck';
 import { accountKey } from '../../utils/accountStorage';
@@ -17,6 +18,7 @@ export interface PhotoRecoveryRow { id: string; kind: 'photo' | 'audio'; name: s
 type CaptureSource = (CapturedPhoto | RecordedAudio) & { kind: 'photo' | 'audio' };
 export interface PhotoRecoveryReport { rows: PhotoRecoveryRow[]; checkedAt: string }
 interface Dependencies {
+  includeRecordings?: boolean;
   jobs: () => Promise<UploadJob[]>;
   exists: (id: string) => Promise<boolean>;
 }
@@ -39,7 +41,7 @@ export async function inspectPhotoRecovery(identity: DriveIdentity, catalog: Clo
   assertScope();
   const deleted = new Set(local.trash.filter(entry => entry.purged || !entry.restored).map(entry => entry.file.id));
   const all: CaptureSource[] = [...local.photos.map(photo => ({ ...photo, kind: 'photo' as const })),
-    ...local.recordings.map(recording => ({ ...recording, kind: 'audio' as const }))];
+    ...((injected?.includeRecordings ?? RECORDING_ENABLED) ? local.recordings.map(recording => ({ ...recording, kind: 'audio' as const })) : [])];
   const ambiguous = new Set(local.photos.filter(photo => local.recordings.some(recording => recording.id === photo.id)).map(photo => photo.id));
   const photos = [...new Map(all.map(source => [source.id, source])).values()].filter(source => !deleted.has(source.id));
   const ids = photos.map(photo => photo.id).filter(id => uuid.test(id));

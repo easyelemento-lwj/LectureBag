@@ -1,6 +1,7 @@
 import { createStore, get, set, del } from 'idb-keyval';
 import { CloudCatalog } from './cloudCatalog';
 import { DriveClient, DriveTransferError } from './driveClient';
+import { MAX_PHOTO_BYTES } from './imageLimits';
 import type { CloudMediaRecord } from './types';
 
 export const TRIAL_FOLDER = 'photo-trial';
@@ -9,8 +10,8 @@ export interface PendingPhoto { id: string; blob: Blob; name: string; capturedAt
 export const photoKey = (uid: string, connectionId: string) => JSON.stringify([uid, connectionId]);
 export const pendingPhoto = (key: string) => get<PendingPhoto>(key, store());
 export async function stagePhoto(key: string, file: File) {
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || !file.size || file.size > 20 * 1024 * 1024) {
-    throw new Error('20MB 이하의 JPEG, PNG, WebP 사진을 선택해 주세요.');
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || !file.size || file.size > MAX_PHOTO_BYTES) {
+    throw new Error('100MiB 이하의 JPEG, PNG, WebP 사진을 선택해 주세요.');
   }
   const bitmap = await createImageBitmap(file); bitmap.close();
   if (await pendingPhoto(key)) throw new Error('이전에 보관한 사진을 먼저 업로드해 주세요.');
@@ -91,7 +92,7 @@ export async function uploadPhoto(key: string, catalog: CloudCatalog, connection
 }
 
 export async function openPhoto(catalog: CloudCatalog, connectionId: string, record: CloudMediaRecord, signal: AbortSignal) {
-  if (record.connectionId !== connectionId || record.kind !== 'photo' || record.sizeBytes > 20 * 1024 * 1024 ||
+  if (record.connectionId !== connectionId || record.kind !== 'photo' || record.sizeBytes > MAX_PHOTO_BYTES ||
     !['image/jpeg', 'image/png', 'image/webp'].includes(record.mimeType)) throw new Error('지원하지 않는 사진입니다.');
   const { client } = trialClient(catalog, connectionId, signal);
   const blob = await client.download(record.driveFileId, signal);

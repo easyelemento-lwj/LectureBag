@@ -55,7 +55,7 @@ export function PcLibraryPanel() {
     <h2 className="font-bold">이 PC에 자동 보관</h2>
     <DesktopControls />
     <p className="text-sm">한 번 켜두면 앱이 열려 있는 동안 새 자료를 자동으로 내려받습니다. 인터넷이 다시 연결되면 놓친 자료도 확인합니다.</p>
-    <p className="text-xs leading-relaxed text-neutral-500">앱에 등록된 사진(20MB 이하)·녹음(100MB 이하)을 이 PC에 미리 보관합니다. 최초 다운로드에는 시간과 디스크 공간이 필요합니다. 이후 기기 사본은 원격 다운로드 없이 바로 열립니다.</p>
+    <p className="text-xs leading-relaxed text-neutral-500">앱에 등록된 사진(100MiB 이하)을 이 PC에 미리 보관합니다. 최초 다운로드에는 시간과 디스크 공간이 필요합니다. 이후 기기 사본은 원격 다운로드 없이 바로 열립니다.</p>
     <div className="flex flex-wrap gap-2">
       <button type="button" className={button} disabled={sync.busy} onClick={() => {
         if (!lib && !window.confirm('이 PC에 지원하는 모든 사진·녹음 원본을 다운로드합니다. 같은 계정으로 로그인한 상태에서는 오프라인에도 열 수 있습니다. 공용 PC에서는 사용하지 마세요. 계속할까요?')) return;
